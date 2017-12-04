@@ -10,5 +10,5 @@ export function uniqueMachineId() {
   });
   assert(targetInterfaces.length === 1, "could not determine MAC address: found more than one candidate Ethernet interface");
 
-  return targetInterfaces[0].mac;
+  return targetInterfaces[0].mac.replace(/:/g, "").toUpperCase();
 }
