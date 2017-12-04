@@ -1,0 +1,39 @@
+{
+  "name": "controller_agent",
+  "version": "0.1.0",
+  "description": "A service which runs on a device and executes commands from the network",
+  "main": "src/server.js",
+  "engines": {
+    "node": "8.9.1"
+  },
+  "scripts": {
+    "build": "gulp build",
+    "test": "gulp test",
+    "tdd": "gulp tdd",
+    "start": "gulp build && node dist/src/server.js",
+    "watch": "gulp watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://marcpeters@bitbucket.org/marcpeters/controller_agent.git"
+  },
+  "author": "Marc Peters",
+  "license": "ISC",
+  "homepage": "https://bitbucket.org/marcpeters/controller_agent#readme",
+  "dependencies": {
+    "babel-cli": "6.26.0",
+    "babel-preset-env": "1.6.1",
+    "bluebird": "3.5.1",
+    "gulp": "3.9.1",
+    "gulp-babel": "7.0.0",
+    "gulp-env": "0.4.0",
+    "gulp-nodemon": "^2.2.1",
+    "gulp-sourcemaps": "2.6.1",
+    "lodash": "4.17.4"
+  },
+  "devDependencies": {
+    "chai": "4.1.2",
+    "gulp-mocha": "4.3.1",
+    "mocha": "4.0.1"
+  }
+}
