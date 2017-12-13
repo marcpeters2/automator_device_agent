@@ -7,6 +7,7 @@ const constants = {
     INITIAL: 0,
     GOT_ID: 1,
     SYNCED_TIME: 2,
+    OPERATING: 3,
   }
 };
 

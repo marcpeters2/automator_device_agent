@@ -15,6 +15,7 @@ function getConfig() {
     case "test":
       return {};
       break;
+
     default:
       throw new Error(`getConfig: unknown environment ${process.env.NODE_ENV}`);
       break;

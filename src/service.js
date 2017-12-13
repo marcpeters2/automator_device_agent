@@ -3,8 +3,14 @@ import Promise from 'bluebird';
 const rpio = require('rpio');
 import { config } from './config';
 import constants from './constants';
+import logger, {logLevels} from './services/Logger';
 import {uniqueMachineId} from './helpers/machine';
+import TimeService from './services/TimeService';
 import request from 'request-promise';
+
+const timeService = new TimeService();
+
+logger.setLevel(logLevels.debug);
 
 const MIN_OPERATION_TIME = 2000,
   outlets = [
@@ -13,11 +19,12 @@ const MIN_OPERATION_TIME = 2000,
     {internalName: "C", type: constants.OUTLET_TYPE_HYDRAULIC, pin: 2},
     {internalName: "D", type: constants.OUTLET_TYPE_HYDRAULIC, pin: 3},
   ];
-
 const machineMAC = uniqueMachineId();
+
 let SYSTEM_STATE = constants.SYSTEM_STATE.INITIAL,
   machineId,
-  networkTime;
+  commands,
+  commandExecutorRunning = false;
 
 
 function run() {
@@ -45,9 +52,9 @@ function run() {
           json: true
         })
         .then((response) => {
+          logger.debug(`Received id ${response.id}`);
           machineId = response.id;
           SYSTEM_STATE = constants.SYSTEM_STATE.GOT_ID;
-          console.log(response);
         });
       break;
 
@@ -58,15 +65,21 @@ function run() {
         json: true
       })
         .then((response) => {
-          networkTime = response.time;
+          timeService.resetTime(response.time);
           SYSTEM_STATE = constants.SYSTEM_STATE.SYNCED_TIME;
-          console.log(response);
         });
       break;
 
     case constants.SYSTEM_STATE.SYNCED_TIME:
-      _operation = Promise.resolve();
-      console.log("tick");
+      _operation = fetchCommands()
+        .then(() => {
+          execCommands();
+          SYSTEM_STATE = constants.SYSTEM_STATE.OPERATING;
+        });
+      break;
+
+    case constants.SYSTEM_STATE.OPERATING:
+      _operation = fetchCommands();
       break;
   }
 
@@ -87,5 +100,83 @@ function run() {
     });
 }
 
+
+function execCommands() {
+  if(commandExecutorRunning) return;
+  commandExecutorRunning = true;
+
+  let nextExecutionTime = new Date().getTime(),
+    executionInterval = 100;
+
+  const pinOff = (pinNum) => {
+    logger.debug(`Pin ${pinNum} OFF`);
+  }
+
+  const pinOn = (pinNum) => {
+    logger.debug(`Pin ${pinNum} ON`);
+  }
+
+  const executor = function () {
+    const now = timeService.getTime();
+    logger.debug(`Executing commands.  Time: ${now}`);
+
+    outlets.forEach((outlet) => {
+      const commandsForOutlet = commands[outlet.pin];
+
+      if(!commandsForOutlet) {
+        pinOff(outlet.pin);
+        return;
+      }
+
+      let activeCommand = null;
+
+      for(let i = 0; i < commandsForOutlet.length; i++) {
+        const commandTime = new Date(commandsForOutlet[i].time).getTime();
+        const nextCommandTime = i + 1 >= commandsForOutlet.length ?
+          Number.MAX_SAFE_INTEGER :
+          new Date(commandsForOutlet[i + 1].time).getTime();
+
+        if(now >= commandTime && now < nextCommandTime) {
+          activeCommand = commandsForOutlet[i];
+        }
+      }
+
+      if(activeCommand) {
+        switch (activeCommand.state) {
+          case constants.OUTLET_OFF:
+            pinOff(outlet.pin);
+            break;
+          case constants.OUTLET_ON:
+            pinOn(outlet.pin);
+            break;
+          default:
+            logger.error(`Command specifies an invalid outlet state: ${activeCommand}`);
+            break;
+        }
+      }
+      else {
+        pinOff(outlet.pin);
+        return;
+      }
+
+    });
+
+    nextExecutionTime += executionInterval;
+    const delay = nextExecutionTime - new Date().getTime();
+    setTimeout(executor, delay);
+  }
+
+  executor();
+}
+
+function fetchCommands() {
+  return request({
+    uri: `http://${config.CONDUCTOR_HOST}:${config.CONDUCTOR_PORT}/controllers/${machineId}/commands`,
+    json: true
+  }).then((response) => {
+    commands = response;
+    logger.debug(response);
+  });
+}
 
 run();
