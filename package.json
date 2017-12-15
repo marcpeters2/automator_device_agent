@@ -10,7 +10,7 @@
     "build": "gulp build",
     "test": "gulp test",
     "tdd": "gulp tdd",
-    "start": "gulp build && node dist/src/server.js",
+    "start": "gulp start",
     "watch": "gulp watch"
   },
   "repository": {

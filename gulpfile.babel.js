@@ -1,3 +1,4 @@
+import {spawn} from 'child_process';
 import env from 'gulp-env';
 import gulp from 'gulp';
 import babel from 'gulp-babel';
@@ -17,7 +18,8 @@ defaultToLocalNodeEnv();
 
 const {config} = require('./src/config');
 const srcPattern = 'src/**/*',
-  testSrcPattern = 'tests/**/*';
+  testSrcPattern = 'tests/**/*',
+  entryPoint = 'dist/src/service.js';
 let neverExit = false,
   buildError = false;
 
@@ -45,9 +47,27 @@ gulp.task('build', () => {
 });
 
 
+gulp.task('start', ['build'], (cb) => {
+  const serverProcess = spawn('node', [entryPoint]);
+
+  serverProcess.stdout.on('data', (data) => {
+    process.stdout.write(data);
+  });
+
+  serverProcess.stderr.on('data', (data) => {
+    process.stderr.write(data);
+  });
+
+  //TODO: Not sure which of these are really necessary
+  serverProcess.on('exit', cb);
+  serverProcess.on('error', cb);
+  serverProcess.on('end', cb);
+});
+
+
 gulp.task('watch', () => {
   const stream = nodemon({
-    script: 'dist/src/service.js',
+    script: entryPoint,
     tasks: ['build'],
     ext: 'js',
     ignore: ['dist/**/*', testSrcPattern]
