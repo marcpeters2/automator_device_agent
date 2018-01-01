@@ -1,7 +1,7 @@
 import logger from './Logger';
 
 
-export default class TimeService {
+class TimeService {
 
   constructor () {
     this._millisOffset = 0;
@@ -16,5 +16,8 @@ export default class TimeService {
   getTime() {
     return new Date().getTime() + this._millisOffset;
   }
-
 }
+
+const singleton = new TimeService();
+
+export default singleton;

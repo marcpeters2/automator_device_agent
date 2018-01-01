@@ -8,7 +8,8 @@ const constants = {
     GOT_ID: 1,
     SYNCED_TIME: 2,
     OPERATING: 3,
-  }
+  },
+  HTTP_REQUEST_TIMEOUT_MS: 5000,
 };
 
 constants.ALL_OUTLET_TYPES = [constants.OUTLET_TYPE_ELECTRIC, constants.OUTLET_TYPE_HYDRAULIC];
