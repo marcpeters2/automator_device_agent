@@ -7,12 +7,13 @@ import {uniqueMachineId} from './helpers/machine';
 import TimeService from './services/TimeService';
 import CommandService from './services/CommandService';
 import request from 'request-promise';
+import Nes from 'nes';
 
 logger.setLevel(logLevels.debug);
 
 const MIN_OPERATION_TIME = 2000;
-
 const machineMAC = uniqueMachineId();
+const websocketClient = new Nes.Client(`ws://${config.CONDUCTOR_HOST}:${config.CONDUCTOR_PORT}`);
 
 let SYSTEM_STATE = constants.SYSTEM_STATE.INITIAL,
   machineId;
@@ -63,6 +64,19 @@ function run() {
       break;
 
     case constants.SYSTEM_STATE.SYNCED_TIME:
+      _operation = websocketClient.connect()
+        .then(() => {
+          websocketClient.subscribe(`/controllers/${machineId}/commands`, (update, flags) => {
+            CommandService.ingestCommands(update);
+          });
+          SYSTEM_STATE = constants.SYSTEM_STATE.WEBSOCKET_CONNECTED;
+        })
+        .catch((err) => {
+          console.log(err);
+        });
+      break;
+
+    case constants.SYSTEM_STATE.WEBSOCKET_CONNECTED:
       _operation = fetchCommands()
         .then(() => {
           CommandService.startBackgroundTask();
