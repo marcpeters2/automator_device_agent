@@ -25,7 +25,6 @@ class HardwareIOService {
       return;
     }
 
-
     switch(state) {
       case constants.OUTLET_ON:
         this._pinMeta[pinNum].state = constants.OUTLET_ON;
