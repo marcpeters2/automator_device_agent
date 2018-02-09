@@ -19,12 +19,13 @@ defaultToLocalNodeEnv();
 const {config} = require('./src/config');
 const srcPattern = 'src/**/*',
   testSrcPattern = 'tests/**/*',
+  copyPatterns = ['auth_token.txt'],
   entryPoint = 'dist/src/service.js';
 let neverExit = false,
   buildError = false;
 
 
-gulp.task('build', () => {
+gulp.task('build', ['copy'], () => {
   buildError = false;
 
   return gulp.src([srcPattern, testSrcPattern], {base: '.'})
@@ -43,6 +44,12 @@ gulp.task('build', () => {
       }
     })
     .pipe(sourceMaps.write('.'))
+    .pipe(gulp.dest('dist'));
+});
+
+
+gulp.task('copy', () => {
+  return gulp.src(copyPatterns, {base: '.'})
     .pipe(gulp.dest('dist'));
 });
 

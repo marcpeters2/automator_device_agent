@@ -1,19 +1,19 @@
 import _ from 'lodash';
+import * as fs from 'fs';
+import * as path from 'path';
 import Promise from 'bluebird';
 import { config } from './config';
 import constants from './constants';
 import logger, {logLevels} from './services/Logger';
-import {uniqueMachineId} from './helpers/machine';
 import TimeService from './services/TimeService';
 import CommandService from './services/CommandService';
-import request from 'request-promise';
 import Nes from 'nes';
 
 logger.setLevel(logLevels.debug);
 
 const MIN_OPERATION_TIME = 2000;
-const machineMAC = uniqueMachineId();
 const websocketClient = new Nes.Client(`ws://${config.CONDUCTOR_HOST}:${config.CONDUCTOR_PORT}`);
+const authToken = fs.readFileSync(path.join(__dirname, "..", "/auth_token.txt"));
 
 let SYSTEM_STATE = constants.SYSTEM_STATE.INITIAL,
   machineId;
@@ -25,58 +25,54 @@ function run() {
   switch (SYSTEM_STATE) {
 
     case constants.SYSTEM_STATE.INITIAL:
-      const body = {MAC: machineMAC};
+      _operation = websocketClient.connect({
+        auth: { headers: { authorization: `Bearer ${authToken}` } },
+        timeout: constants.HTTP_REQUEST_TIMEOUT_MS,
+      })
+        .then(() => {
+          SYSTEM_STATE = constants.SYSTEM_STATE.WEBSOCKET_CONNECTED;
+        });
+      break;
+
+    case constants.SYSTEM_STATE.WEBSOCKET_CONNECTED:
+      const payload = {};
 
       constants.ALL_OUTLET_TYPES.forEach((outletType) => {
         const outletsOfType = config.OUTLETS.filter((outlet) => outlet.type === outletType);
         if (outletsOfType.length === 0) return;
-        body[outletType] = {};
+        payload[outletType] = {};
         outletsOfType.forEach(outlet => {
-          _.set(body, `${outletType}.${outlet.pin}`, outlet.internalName);
+          _.set(payload, `${outletType}.${outlet.pin}`, outlet.internalName);
         })
       });
 
-      _operation = request({
-          method: 'POST',
-          uri: `http://${config.CONDUCTOR_HOST}:${config.CONDUCTOR_PORT}/controllers`,
-          body,
-          json: true,
-          timeout: constants.HTTP_REQUEST_TIMEOUT_MS
+      _operation = websocketClient.request({
+          method: "POST",
+          path: "/controllers",
+          payload,
         })
-        .then((response) => {
-          logger.debug(`Received id ${response.id}`);
-          machineId = response.id;
+        .then(({payload: {id}}) => {
+          logger.debug(`Received id ${id}`);
+          machineId = id;
           SYSTEM_STATE = constants.SYSTEM_STATE.GOT_ID;
         });
       break;
 
     case constants.SYSTEM_STATE.GOT_ID:
 
-      _operation = request({
-        uri: `http://${config.CONDUCTOR_HOST}:${config.CONDUCTOR_PORT}/time`,
-        json: true,
-        timeout: constants.HTTP_REQUEST_TIMEOUT_MS
+      _operation = websocketClient.request({
+        path: "/time"
       })
-        .then((response) => {
-          TimeService.resetTime(response.time);
+        .then(({payload: {time}}) => {
+          TimeService.resetTime(time);
+          websocketClient.subscribe(`/controllers/${machineId}/commands`, (update, flags) => {
+            CommandService.ingestCommands(update);
+          });
           SYSTEM_STATE = constants.SYSTEM_STATE.SYNCED_TIME;
         });
       break;
 
     case constants.SYSTEM_STATE.SYNCED_TIME:
-      _operation = websocketClient.connect()
-        .then(() => {
-          websocketClient.subscribe(`/controllers/${machineId}/commands`, (update, flags) => {
-            CommandService.ingestCommands(update);
-          });
-          SYSTEM_STATE = constants.SYSTEM_STATE.WEBSOCKET_CONNECTED;
-        })
-        .catch((err) => {
-          console.log(err);
-        });
-      break;
-
-    case constants.SYSTEM_STATE.WEBSOCKET_CONNECTED:
       _operation = fetchCommands()
         .then(() => {
           CommandService.startBackgroundTask();
@@ -108,12 +104,10 @@ function run() {
 
 
 function fetchCommands() {
-  return request({
-    uri: `http://${config.CONDUCTOR_HOST}:${config.CONDUCTOR_PORT}/controllers/${machineId}/commands`,
-    json: true,
-    timeout: constants.HTTP_REQUEST_TIMEOUT_MS
-  }).then((response) => {
-    CommandService.ingestCommands(response);
+  return websocketClient.request({
+    path: `/controllers/${machineId}/commands`,
+  }).then(({payload}) => {
+    CommandService.ingestCommands(payload);
   });
 }
 
