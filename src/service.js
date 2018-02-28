@@ -16,7 +16,15 @@ const websocketClient = new Nes.Client(`ws://${config.CONDUCTOR_HOST}:${config.C
 const authToken = fs.readFileSync(path.join(__dirname, "..", "/auth_token.txt"));
 
 let SYSTEM_STATE = constants.SYSTEM_STATE.INITIAL,
+  lastCommandRefreshTimestamp = 0,
+  nextCommandRefreshTimestamp = new Date().getTime(),
   machineId;
+
+websocketClient.onConnect = () => {
+  if (SYSTEM_STATE === constants.SYSTEM_STATE.OPERATING) {
+    nextCommandRefreshTimestamp = new Date().getTime(); // Refresh commands now
+  }
+};
 
 function run() {
 
@@ -66,7 +74,7 @@ function run() {
         .then(({payload: {time}}) => {
           TimeService.resetTime(time);
           websocketClient.subscribe(`/controllers/${machineId}/commands`, (update, flags) => {
-            CommandService.ingestCommands(update);
+            processCommands(update);
           });
           SYSTEM_STATE = constants.SYSTEM_STATE.SYNCED_TIME;
         });
@@ -81,20 +89,53 @@ function run() {
       break;
 
     case constants.SYSTEM_STATE.OPERATING:
-      _operation = fetchCommands();
+      const now = TimeService.getTime(),
+        timeSinceLastCommandRefresh = now - lastCommandRefreshTimestamp;
+
+      if (timeSinceLastCommandRefresh < constants.COMMAND_REFRESH_MIN_INTERVAL_MS) {
+        _operation = Promise.delay(100);
+        break;
+      }
+
+      if (nextCommandRefreshTimestamp > now) {
+        if (timeSinceLastCommandRefresh >= constants.COMMAND_REFRESH_MAX_INTERVAL_MS) {
+          _operation = fetchCommands();
+        }
+        else {
+          _operation = Promise.delay(100);
+        }
+      }
+      else {
+        _operation = fetchCommands();
+      }
+
       break;
   }
 
   const start = new Date().getTime();
+  let operationFailed = false;
+
   _operation
     .catch((err) => {
+      operationFailed = true;
       console.log(err);
     })
     .then(() => {
       const end = new Date().getTime(),
         operationTime = end - start;
+      let delay = null;
+      //
+      // if (SYSTEM_STATE !== constants.SYSTEM_STATE.OPERATING && !operationFailed) {
+      //   delay = 0;
+      // }
+      // else {
+      //   delay = Math.max(MIN_OPERATION_TIME - operationTime, 0);
+      // }
 
-      const delay = Math.max(MIN_OPERATION_TIME - operationTime, 0);
+      if (operationFailed) {
+        delay = 2000;
+      }
+
       return Promise.delay(delay);
     })
     .then(() => {
@@ -107,8 +148,18 @@ function fetchCommands() {
   return websocketClient.request({
     path: `/controllers/${machineId}/commands`,
   }).then(({payload}) => {
-    CommandService.ingestCommands(payload);
+    processCommands(payload);
   });
+}
+
+function processCommands(payload) {
+  CommandService.ingestCommands(payload);
+  const now = TimeService.getTime(),
+    commandRefreshTimeHint = CommandService.refreshCommandsHint();
+  lastCommandRefreshTimestamp = now;
+  nextCommandRefreshTimestamp = Math.max(now + constants.COMMAND_REFRESH_MIN_INTERVAL_MS, commandRefreshTimeHint);
+
+  logger.debug(`Next commands will be retreived in ${Math.trunc((nextCommandRefreshTimestamp - now)/1000)} seconds`)
 }
 
 run();

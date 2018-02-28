@@ -6,7 +6,10 @@ function getConfig() {
 
   switch((process.env.NODE_ENV || "").toLowerCase()) {
     case "production":
-      configuration = {};
+      configuration = {
+        CONDUCTOR_HOST: "thawing-journey-12821.herokuapp.com",
+        CONDUCTOR_PORT: 80
+      };
       break;
 
     case "local":

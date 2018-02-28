@@ -15,10 +15,11 @@ class CommandService {
   ingestCommands(newCommands) {
     const millisNow = TimeService.getTime();
 
-    logger.debug(`ingestCommands: Merging old commands`)
-    logger.debug(`${JSON.stringify(this._commands, null, 2)}`);
-    logger.debug(`with new commands`);
-    logger.debug(`${JSON.stringify(newCommands, null, 2)}`);
+    logger.debug("Received commands");
+    // logger.debug(`ingestCommands: Merging old commands`)
+    // logger.debug(`${JSON.stringify(this._commands, null, 2)}`);
+    // logger.debug(`with new commands`);
+    // logger.debug(`${JSON.stringify(newCommands, null, 2)}`);
 
     //Merge new commands into existing commands
     config.OUTLETS.map(_.property("pin"))
@@ -35,16 +36,16 @@ class CommandService {
         const newCommandsStartTime = new Date(newCommands[pinNumber][0].time).getTime();
         const oldCommandsToKeep = _.dropRightWhile(this._commands[pinNumber], (command) => {
           if(new Date(command.time).getTime() >= newCommandsStartTime) {
-            logger.debug(`ingestCommands: Discarding old command ${JSON.stringify(command, null, 2)} for pin ${pinNumber}`);
+            // logger.debug(`ingestCommands: Discarding old command ${JSON.stringify(command, null, 2)} for pin ${pinNumber}`);
           }
           return new Date(command.time).getTime() >= newCommandsStartTime;
         });
         this._commands[pinNumber] = oldCommandsToKeep.concat(newCommands[pinNumber]);
       });
 
-    logger.debug(`ingestCommands: Pruning`);
-    logger.debug(JSON.stringify(this._commands, null, 2));
-    logger.debug(`at time ${millisNow}`);
+    // logger.debug(`ingestCommands: Pruning`);
+    // logger.debug(JSON.stringify(this._commands, null, 2));
+    // logger.debug(`at time ${millisNow}`);
 
     this._commands = _.mapValues(this._commands, (commandList) => {
       return _.dropWhile(commandList, (command, index) => {
@@ -54,12 +55,29 @@ class CommandService {
       });
     });
 
-    logger.debug(`pruneCommands: Result is `);
-    logger.debug(JSON.stringify(this._commands, null, 2));
+    // logger.debug(`pruneCommands: Result is `);
+    // logger.debug(JSON.stringify(this._commands, null, 2));
+  }
+
+  refreshCommandsHint() {
+    let nextRecommendedRefreshTimestamp = Number.MAX_SAFE_INTEGER;
+
+    _.values(this._commands).forEach((commandsForOutlet) => {
+      if (commandsForOutlet.some(command => command.isLast)) {
+        return;
+      }
+
+      const recommendedRefreshTimeForOutlet = new Date(_.last(commandsForOutlet).time).getTime() - constants.COMMAND_REFRESH_LEAD_TIME_MS;
+      nextRecommendedRefreshTimestamp = Math.min(nextRecommendedRefreshTimestamp, recommendedRefreshTimeForOutlet);
+    });
+
+    return nextRecommendedRefreshTimestamp;
   }
 
   startBackgroundTask() {
     if(this._backgroundTaskRunning) return;
+
+    console.log("Starting pin switching task...");
     this._backgroundTaskRunning = true;
 
     const self = this;
@@ -68,7 +86,7 @@ class CommandService {
 
     const task = function () {
       const now = TimeService.getTime();
-      logger.debug(`Executing commands.  Time: ${now}`);
+      // logger.debug(`Executing commands.  Time: ${now}`);
 
       config.OUTLETS.forEach((outlet) => {
         const commandsForOutlet = self._commands[outlet.pin];
