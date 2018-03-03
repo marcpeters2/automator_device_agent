@@ -49,6 +49,11 @@ class HardwareIOService {
         throw new Error(`setPinState: Unknown pin state ${state}`);
     }
   }
+
+
+  getPinState() {
+    return this._pinMeta;
+  }
 }
 
 const singleton = new HardwareIOService();

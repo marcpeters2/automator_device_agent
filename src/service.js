@@ -7,6 +7,7 @@ import constants from './constants';
 import logger, {logLevels} from './services/Logger';
 import TimeService from './services/TimeService';
 import CommandService from './services/CommandService';
+import HardwareIOService from './services/HardwareIOService';
 import Nes from 'nes';
 
 logger.setLevel(logLevels.debug);
@@ -14,6 +15,7 @@ logger.setLevel(logLevels.debug);
 const MIN_OPERATION_TIME = 2000;
 const websocketClient = new Nes.Client(`ws://${config.CONDUCTOR_HOST}:${config.CONDUCTOR_PORT}`);
 const authToken = fs.readFileSync(path.join(__dirname, "..", "/auth_token.txt"));
+const softwareVersion = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "/package.json")).toString()).version;
 
 let SYSTEM_STATE = constants.SYSTEM_STATE.INITIAL,
   lastCommandRefreshTimestamp = 0,
@@ -22,7 +24,9 @@ let SYSTEM_STATE = constants.SYSTEM_STATE.INITIAL,
 
 websocketClient.onConnect = () => {
   if (SYSTEM_STATE === constants.SYSTEM_STATE.OPERATING) {
-    nextCommandRefreshTimestamp = new Date().getTime(); // Refresh commands now
+    // Websocket has disconnected and reconnected. Refresh commands now
+    //TODO: Can just hook into an "onDisconnect" event?
+    nextCommandRefreshTimestamp = new Date().getTime();
   }
 };
 
@@ -62,6 +66,12 @@ function run() {
         .then(({payload: {id}}) => {
           logger.debug(`Received id ${id}`);
           machineId = id;
+
+          websocketClient.subscribe(`/controllers/${machineId}/status`, (update, flags) => {
+            console.log("Received request to send status data");
+            sendStatus();
+          });
+
           SYSTEM_STATE = constants.SYSTEM_STATE.GOT_ID;
         });
       break;
@@ -160,6 +170,25 @@ function processCommands(payload) {
   nextCommandRefreshTimestamp = Math.max(now + constants.COMMAND_REFRESH_MIN_INTERVAL_MS, commandRefreshTimeHint);
 
   logger.debug(`Next commands will be retreived in ${Math.trunc((nextCommandRefreshTimestamp - now)/1000)} seconds`)
+}
+
+function sendStatus() {
+  const payload = {
+    softwareVersion,
+    deviceTime: new Date().toISOString(),
+    applicationTime: new Date(TimeService.getTime()).toISOString(),
+    commands: CommandService.getCommands(),
+    pinState: HardwareIOService.getPinState()
+  };
+
+  return websocketClient.request({
+    method: "POST",
+    path: `/controllers/${machineId}/status`,
+    payload,
+  })
+    .catch((err) => {
+      console.log(err);
+    });
 }
 
 run();

@@ -74,6 +74,12 @@ class CommandService {
     return nextRecommendedRefreshTimestamp;
   }
 
+
+  getCommands() {
+    return this._commands;
+  }
+
+
   startBackgroundTask() {
     if(this._backgroundTaskRunning) return;
 
@@ -129,7 +135,7 @@ class CommandService {
       nextExecutionTime += executionInterval;
       const delay = nextExecutionTime - new Date().getTime();
       setTimeout(task, delay);
-    }
+    };
 
     task();
   }

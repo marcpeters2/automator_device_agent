@@ -19,7 +19,7 @@ defaultToLocalNodeEnv();
 const {config} = require('./src/config');
 const srcPattern = 'src/**/*',
   testSrcPattern = 'tests/**/*',
-  copyPatterns = ['auth_token.txt'],
+  copyPatterns = ['auth_token.txt', 'package.json'],
   entryPoint = 'dist/src/service.js';
 let neverExit = false,
   buildError = false;
