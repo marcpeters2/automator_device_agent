@@ -1,3 +1,6 @@
+import CBuffer from "CBuffer";
+const CircularBuffer = CBuffer;
+
 export const logLevels = {
   debug: 4,
   info: 3,
@@ -6,35 +9,75 @@ export const logLevels = {
   fatal: 0
 };
 
+function toString(logLevel) {
+  switch(logLevel) {
+    case logLevels.debug:
+      return "DEBUG";
+    case logLevels.info:
+      return "INFO";
+    case logLevels.warn:
+      return "WARN";
+    case logLevels.error:
+      return "ERROR";
+    case logLevels.fatal:
+      return "FATAL";
+  }
+}
+
 class Logger {
+
+  constructor() {
+    this._history = new CircularBuffer(200);
+  }
 
   setLevel(level) {
     this._logLevel = level;
   }
 
   debug(...args) {
-    if(this._logLevel < logLevels.debug) return;
-    console.log(...args);
+    this._log(logLevels.debug, args);
   }
 
   info(...args) {
-    if(this._logLevel < logLevels.info) return;
-    console.log(...args);
+    this._log(logLevels.info, args);
   }
 
   warn(...args) {
-    if(this._logLevel < logLevels.warn) return;
-    console.warn(...args);
+    this._log(logLevels.warn, args);
   }
 
   error(...args) {
-    if(this._logLevel < logLevels.error) return;
-    console.error(...args);
+    this._log(logLevels.error, args);
   }
 
   fatal(...args) {
-    if(this._logLevel < logLevels.fatal) return;
-    console.error(...args);
+    this._log(logLevels.fatal, args);
+  }
+
+  _log(level, args) {
+    if(this._logLevel < level) return;
+
+    let logFunc = null;
+
+    switch(level) {
+      case logLevels.warn:
+        logFunc = console.warn;
+        break;
+      case logLevels.error:
+      case logLevels.fatal:
+        logFunc = console.error;
+        break;
+      default:
+        logFunc = console.log;
+        break;
+    }
+    args.unshift(`${new Date().toISOString()} [${toString(level)}]: `);
+    this._history.push(args.reduce((arg, acc) => arg.toString() + acc, ""));
+    logFunc(...args);
+  }
+
+  getHistory() {
+    return this._history.toArray();
   }
 }
 

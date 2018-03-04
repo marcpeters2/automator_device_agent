@@ -4,31 +4,42 @@ import * as path from 'path';
 import Promise from 'bluebird';
 import { config } from './config';
 import constants from './constants';
+import {getLocalIpAddresses} from './helpers/ipAddress';
 import logger, {logLevels} from './services/Logger';
 import TimeService from './services/TimeService';
 import CommandService from './services/CommandService';
 import HardwareIOService from './services/HardwareIOService';
 import Nes from 'nes';
 
-logger.setLevel(logLevels.debug);
+logger.setLevel(logLevels.info);
 
 const MIN_OPERATION_TIME = 2000;
-const websocketClient = new Nes.Client(`ws://${config.CONDUCTOR_HOST}:${config.CONDUCTOR_PORT}`);
 const authToken = fs.readFileSync(path.join(__dirname, "..", "/auth_token.txt"));
 const softwareVersion = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "/package.json")).toString()).version;
 
 let SYSTEM_STATE = constants.SYSTEM_STATE.INITIAL,
   lastCommandRefreshTimestamp = 0,
-  nextCommandRefreshTimestamp = new Date().getTime(),
-  machineId;
+  nextCommandRefreshTimestamp = 0,
+  websocketClient = null,
+  websocketSubscriptions = {
+    commandUpdates: false,
+    statusUpdates: false,
+  },
+  machineId = null;
 
-websocketClient.onConnect = () => {
-  if (SYSTEM_STATE === constants.SYSTEM_STATE.OPERATING) {
-    // Websocket has disconnected and reconnected. Refresh commands now
-    //TODO: Can just hook into an "onDisconnect" event?
-    nextCommandRefreshTimestamp = new Date().getTime();
-  }
+const onWebsocketClientConnected = () => {
+  logger.info("******** WEBSOCKET CONNECTED");
 };
+const onWebsocketClientDisconnected = () => {
+  logger.warn("******** WEBSOCKET DISCONNECTED");
+  // Websocket has disconnected. When it reconnects, refresh commands immediately
+  nextCommandRefreshTimestamp = TimeService.getTime();
+};
+const onWebsocketClientError = (err) => {
+  logger.warn("******** WEBSOCKET ERROR");
+  SYSTEM_STATE = constants.SYSTEM_STATE.INITIAL;
+};
+
 
 function run() {
 
@@ -37,10 +48,24 @@ function run() {
   switch (SYSTEM_STATE) {
 
     case constants.SYSTEM_STATE.INITIAL:
-      _operation = websocketClient.connect({
-        auth: { headers: { authorization: `Bearer ${authToken}` } },
-        timeout: constants.HTTP_REQUEST_TIMEOUT_MS,
-      })
+      _operation = Promise.resolve()
+        .then(() => {
+          if (websocketClient) {
+            return websocketClient.disconnect();
+          }
+          else {
+            websocketClient = new Nes.Client(`ws://${config.CONDUCTOR_HOST}:${config.CONDUCTOR_PORT}`);
+            websocketClient.onConnect = onWebsocketClientConnected;
+            websocketClient.onDisconnect = onWebsocketClientDisconnected;
+            websocketClient.onError = onWebsocketClientError;
+            return;
+          }
+        })
+        .then(() => {
+          return websocketClient.connect({
+            auth: { headers: { authorization: `Bearer ${authToken}` } },
+          });
+        })
         .then(() => {
           SYSTEM_STATE = constants.SYSTEM_STATE.WEBSOCKET_CONNECTED;
         });
@@ -64,29 +89,49 @@ function run() {
           payload,
         })
         .then(({payload: {id}}) => {
-          logger.debug(`Received id ${id}`);
+          logger.info(`Received id ${id}`);
           machineId = id;
 
-          websocketClient.subscribe(`/controllers/${machineId}/status`, (update, flags) => {
-            console.log("Received request to send status data");
-            sendStatus();
-          });
-
-          SYSTEM_STATE = constants.SYSTEM_STATE.GOT_ID;
+          if (!websocketSubscriptions.statusUpdates) {
+            return websocketClient.subscribe(`/controllers/${machineId}/status`, (update, flags) => {
+                logger.info("****** Sending status data");
+                sendStatus();
+              })
+              .then(() => {
+                websocketSubscriptions.statusUpdates = true;
+                SYSTEM_STATE = constants.SYSTEM_STATE.GOT_ID;
+              });
+          }
+          else {
+            SYSTEM_STATE = constants.SYSTEM_STATE.GOT_ID;
+          }
         });
       break;
 
     case constants.SYSTEM_STATE.GOT_ID:
+      const start = new Date().getTime();
 
       _operation = websocketClient.request({
         path: "/time"
       })
         .then(({payload: {time}}) => {
-          TimeService.resetTime(time);
-          websocketClient.subscribe(`/controllers/${machineId}/commands`, (update, flags) => {
-            processCommands(update);
-          });
-          SYSTEM_STATE = constants.SYSTEM_STATE.SYNCED_TIME;
+          const end = new Date().getTime(),
+            estimatedLatency = Math.trunc((start - end) / 2);
+          TimeService.resetTime(time - estimatedLatency);
+
+          if (!websocketSubscriptions.commandUpdates) {
+            return websocketClient.subscribe(`/controllers/${machineId}/commands`, (update, flags) => {
+                logger.info("Received new commands from server");
+                processCommands(update);
+              })
+              .then(() => {
+                SYSTEM_STATE = constants.SYSTEM_STATE.SYNCED_TIME;
+                websocketSubscriptions.commandUpdates = true;
+              });
+          }
+          else {
+            SYSTEM_STATE = constants.SYSTEM_STATE.SYNCED_TIME;
+          }
         });
       break;
 
@@ -103,7 +148,7 @@ function run() {
         timeSinceLastCommandRefresh = now - lastCommandRefreshTimestamp;
 
       if (timeSinceLastCommandRefresh < constants.COMMAND_REFRESH_MIN_INTERVAL_MS) {
-        _operation = Promise.delay(100);
+        _operation = Promise.delay(500);
         break;
       }
 
@@ -112,7 +157,7 @@ function run() {
           _operation = fetchCommands();
         }
         else {
-          _operation = Promise.delay(100);
+          _operation = Promise.delay(500);
         }
       }
       else {
@@ -122,33 +167,24 @@ function run() {
       break;
   }
 
-  const start = new Date().getTime();
   let operationFailed = false;
 
   _operation
     .catch((err) => {
       operationFailed = true;
-      console.log(err);
+      logger.error(err);
     })
     .then(() => {
-      const end = new Date().getTime(),
-        operationTime = end - start;
       let delay = null;
-      //
-      // if (SYSTEM_STATE !== constants.SYSTEM_STATE.OPERATING && !operationFailed) {
-      //   delay = 0;
-      // }
-      // else {
-      //   delay = Math.max(MIN_OPERATION_TIME - operationTime, 0);
-      // }
 
       if (operationFailed) {
-        delay = 2000;
+        delay = MIN_OPERATION_TIME;
       }
 
       return Promise.delay(delay);
     })
     .then(() => {
+      logger.debug(">> NEXT OP");
       run();
     });
 }
@@ -158,9 +194,11 @@ function fetchCommands() {
   return websocketClient.request({
     path: `/controllers/${machineId}/commands`,
   }).then(({payload}) => {
+    logger.info("Fetched commands from server");
     processCommands(payload);
   });
 }
+
 
 function processCommands(payload) {
   CommandService.ingestCommands(payload);
@@ -169,25 +207,29 @@ function processCommands(payload) {
   lastCommandRefreshTimestamp = now;
   nextCommandRefreshTimestamp = Math.max(now + constants.COMMAND_REFRESH_MIN_INTERVAL_MS, commandRefreshTimeHint);
 
-  logger.debug(`Next commands will be retreived in ${Math.trunc((nextCommandRefreshTimestamp - now)/1000)} seconds`)
+  logger.info(`Next command retrieval: +${Math.trunc((nextCommandRefreshTimestamp - now)/1000)} seconds`)
 }
+
 
 function sendStatus() {
   const payload = {
     softwareVersion,
     deviceTime: new Date().toISOString(),
     applicationTime: new Date(TimeService.getTime()).toISOString(),
+    ipAddresses: getLocalIpAddresses(),
     commands: CommandService.getCommands(),
-    pinState: HardwareIOService.getPinState()
+    pinState: HardwareIOService.getPinState(),
+    recentLogs: logger.getHistory()
   };
 
   return websocketClient.request({
-    method: "POST",
-    path: `/controllers/${machineId}/status`,
-    payload,
-  })
+      method: "POST",
+      path: `/controllers/${machineId}/status`,
+      payload,
+    })
     .catch((err) => {
-      console.log(err);
+      logger.error("**** Failed to send status");
+      logger.error(err);
     });
 }
 
