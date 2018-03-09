@@ -5,6 +5,7 @@ import Promise from 'bluebird';
 import { config } from './config';
 import constants from './constants';
 import {getLocalIpAddresses} from './helpers/ipAddress';
+import {subscribeOnce} from "./helpers/websocket";
 import logger, {logLevels} from './services/Logger';
 import TimeService from './services/TimeService';
 import CommandService from './services/CommandService';
@@ -17,61 +18,61 @@ const MIN_OPERATION_TIME = 2000;
 const authToken = fs.readFileSync(path.join(__dirname, "..", "/auth_token.txt"));
 const softwareVersion = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "/package.json")).toString()).version;
 
-let SYSTEM_STATE = constants.SYSTEM_STATE.INITIAL,
+let SYSTEM_STATE = null,
   lastCommandRefreshTimestamp = 0,
   nextCommandRefreshTimestamp = 0,
   websocketClient = null,
-  websocketSubscriptions = {
-    commandUpdates: false,
-    statusUpdates: false,
-  },
   machineId = null;
 
-const onWebsocketClientConnected = () => {
-  logger.info("******** WEBSOCKET CONNECTED");
-};
-const onWebsocketClientDisconnected = () => {
-  logger.warn("******** WEBSOCKET DISCONNECTED");
-  // Websocket has disconnected. When it reconnects, refresh commands immediately
-  nextCommandRefreshTimestamp = TimeService.getTime();
-};
-const onWebsocketClientError = (err) => {
-  logger.warn("******** WEBSOCKET ERROR");
-  SYSTEM_STATE = constants.SYSTEM_STATE.INITIAL;
-};
 
+function transitionTo(state) {
+  logger.info(`>> Transitioning to state ${state}`);
+  SYSTEM_STATE = state;
+}
+
+
+transitionTo(constants.SYSTEM_STATE.INITIALIZING);
 
 function run() {
 
   let _operation;
 
   switch (SYSTEM_STATE) {
-
-    case constants.SYSTEM_STATE.INITIAL:
+    case constants.SYSTEM_STATE.INITIALIZING:
       _operation = Promise.resolve()
         .then(() => {
-          if (websocketClient) {
-            return websocketClient.disconnect();
-          }
-          else {
-            websocketClient = new Nes.Client(`ws://${config.CONDUCTOR_HOST}:${config.CONDUCTOR_PORT}`);
-            websocketClient.onConnect = onWebsocketClientConnected;
-            websocketClient.onDisconnect = onWebsocketClientDisconnected;
-            websocketClient.onError = onWebsocketClientError;
-            return;
-          }
-        })
-        .then(() => {
-          return websocketClient.connect({
-            auth: { headers: { authorization: `Bearer ${authToken}` } },
+          websocketClient = new Nes.Client(`ws://${config.CONDUCTOR_HOST}:${config.CONDUCTOR_PORT}`, {
+            timeout: constants.HTTP_REQUEST_TIMEOUT_MS
           });
-        })
-        .then(() => {
-          SYSTEM_STATE = constants.SYSTEM_STATE.WEBSOCKET_CONNECTED;
+          websocketClient.onConnect = () => {
+            logger.info("******** WEBSOCKET CONNECTED");
+          };
+          websocketClient.onDisconnect = () => {
+            logger.warn("******** WEBSOCKET DISCONNECTED");
+            // Websocket has disconnected. When it reconnects, refresh commands immediately
+            nextCommandRefreshTimestamp = TimeService.getTime();
+          };
+          websocketClient.onError = (err) => {
+            logger.warn("******** WEBSOCKET ERROR");
+            transitionTo(constants.SYSTEM_STATE.CONNECTING_WEBSOCKET);
+          };
+
+          transitionTo(constants.SYSTEM_STATE.CONNECTING_WEBSOCKET);
         });
       break;
 
-    case constants.SYSTEM_STATE.WEBSOCKET_CONNECTED:
+    case constants.SYSTEM_STATE.CONNECTING_WEBSOCKET:
+      _operation =  websocketClient.disconnect()
+        .then(() => {
+          return websocketClient.connect({
+            auth: {headers: {authorization: `Bearer ${authToken}`}},
+            timeout: constants.HTTP_REQUEST_TIMEOUT_MS
+          });
+        })
+        .then(() => transitionTo(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES));
+      break;
+
+    case constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES:
       const payload = {};
 
       constants.ALL_OUTLET_TYPES.forEach((outletType) => {
@@ -92,23 +93,15 @@ function run() {
           logger.info(`Received id ${id}`);
           machineId = id;
 
-          if (!websocketSubscriptions.statusUpdates) {
-            return websocketClient.subscribe(`/controllers/${machineId}/status`, (update, flags) => {
-                logger.info("****** Sending status data");
-                sendStatus();
-              })
-              .then(() => {
-                websocketSubscriptions.statusUpdates = true;
-                SYSTEM_STATE = constants.SYSTEM_STATE.GOT_ID;
-              });
-          }
-          else {
-            SYSTEM_STATE = constants.SYSTEM_STATE.GOT_ID;
-          }
+          return subscribeOnce(websocketClient, `/controllers/${machineId}/status`, (update, flags) => {
+              logger.info("****** Sending status data");
+              sendStatus();
+            })
+            .then(() => transitionTo(constants.SYSTEM_STATE.SYNCING_TIME));
         });
       break;
 
-    case constants.SYSTEM_STATE.GOT_ID:
+    case constants.SYSTEM_STATE.SYNCING_TIME:
       const start = new Date().getTime();
 
       _operation = websocketClient.request({
@@ -119,27 +112,19 @@ function run() {
             estimatedLatency = Math.trunc((start - end) / 2);
           TimeService.resetTime(time - estimatedLatency);
 
-          if (!websocketSubscriptions.commandUpdates) {
-            return websocketClient.subscribe(`/controllers/${machineId}/commands`, (update, flags) => {
-                logger.info("Received new commands from server");
-                processCommands(update);
-              })
-              .then(() => {
-                SYSTEM_STATE = constants.SYSTEM_STATE.SYNCED_TIME;
-                websocketSubscriptions.commandUpdates = true;
-              });
-          }
-          else {
-            SYSTEM_STATE = constants.SYSTEM_STATE.SYNCED_TIME;
-          }
+         subscribeOnce(websocketClient, `/controllers/${machineId}/commands`, (update, flags) => {
+              logger.info("Received new commands from server");
+              processCommands(update);
+            })
+            .then(() => transitionTo(constants.SYSTEM_STATE.STARTING_IO_TASK));
         });
       break;
 
-    case constants.SYSTEM_STATE.SYNCED_TIME:
+    case constants.SYSTEM_STATE.STARTING_IO_TASK:
       _operation = fetchCommands()
         .then(() => {
           CommandService.startBackgroundTask();
-          SYSTEM_STATE = constants.SYSTEM_STATE.OPERATING;
+          transitionTo(constants.SYSTEM_STATE.OPERATING);
         });
       break;
 
@@ -184,7 +169,6 @@ function run() {
       return Promise.delay(delay);
     })
     .then(() => {
-      logger.debug(">> NEXT OP");
       run();
     });
 }
