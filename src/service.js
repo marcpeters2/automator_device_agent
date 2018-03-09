@@ -26,7 +26,7 @@ let SYSTEM_STATE = null,
 
 
 function transitionTo(state) {
-  logger.info(`>> Transitioning to state ${state}`);
+  logger.info(`>>> Transitioning to state ${state}`);
   SYSTEM_STATE = state;
 }
 
