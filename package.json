@@ -1,6 +1,6 @@
 {
   "name": "controller_agent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A service which runs on a device and executes commands from the network",
   "main": "src/server.js",
   "engines": {
