@@ -7,8 +7,8 @@ function getConfig() {
   switch((process.env.NODE_ENV || "").toLowerCase()) {
     case "production":
       configuration = {
-        CONDUCTOR_HOST: "thawing-journey-12821.herokuapp.com",
-        CONDUCTOR_PORT: 80
+        CONDUCTOR_HOST: "api.marcpeters.ca",
+        CONDUCTOR_PORT: 443
       };
       break;
 
