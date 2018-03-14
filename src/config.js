@@ -7,15 +7,15 @@ function getConfig() {
   switch((process.env.NODE_ENV || "").toLowerCase()) {
     case "production":
       configuration = {
-        CONDUCTOR_HOST: "api.marcpeters.ca",
-        CONDUCTOR_PORT: 443
+        API_HOST: "api.marcpeters.ca",
+        API_PORT: 443
       };
       break;
 
     case "local":
       configuration = {
-        CONDUCTOR_HOST: "localhost",
-        CONDUCTOR_PORT: 8000
+        API_HOST: "localhost",
+        API_PORT: 8000
       };
       break;
 
