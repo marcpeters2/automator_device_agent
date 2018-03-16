@@ -43,7 +43,8 @@ function run() {
     case constants.SYSTEM_STATE.INITIALIZING:
       _operation = Promise.resolve()
         .then(() => {
-          websocketClient = new Nes.Client(`wss://${config.API_HOST}:${config.API_PORT}`, {
+          const websocketProtocol = config.USE_SECURE_WEBSOCKETS === false ? "ws" : "wss";
+          websocketClient = new Nes.Client(`${websocketProtocol}://${config.API_HOST}:${config.API_PORT}`, {
             timeout: constants.HTTP_REQUEST_TIMEOUT_MS
           });
           websocketClient.onConnect = () => {

@@ -8,14 +8,16 @@ function getConfig() {
     case "production":
       configuration = {
         API_HOST: "api.marcpeters.ca",
-        API_PORT: 443
+        API_PORT: 443,
+        USE_SECURE_WEBSOCKETS: true
       };
       break;
 
     case "local":
       configuration = {
         API_HOST: "localhost",
-        API_PORT: 8000
+        API_PORT: 8000,
+        USE_SECURE_WEBSOCKETS: false
       };
       break;
 
