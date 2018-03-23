@@ -17,6 +17,7 @@ logger.setLevel(logLevels.info);
 const MIN_OPERATION_TIME = 2000;
 const authToken = fs.readFileSync(path.join(__dirname, "..", "/auth_token.txt"));
 const softwareVersion = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "/package.json")).toString()).version;
+const bootTime = new Date();
 
 let SYSTEM_STATE = null,
   lastCommandRefreshTimestamp = 0,
@@ -201,6 +202,7 @@ function processCommands(payload) {
 function sendStatus() {
   const payload = {
     softwareVersion,
+    bootTime: bootTime.toISOString(),
     deviceTime: new Date().toISOString(),
     applicationTime: new Date(TimeService.getTime()).toISOString(),
     ipAddresses: getLocalIpAddresses(),
