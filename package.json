@@ -11,7 +11,8 @@
     "test": "gulp test",
     "tdd": "gulp tdd",
     "start": "gulp start",
-    "watch": "gulp watch"
+    "watch": "gulp watch",
+    "svc:status": "sudo journalctl -u process-controller-agent.service -f"
   },
   "repository": {
     "type": "git",
