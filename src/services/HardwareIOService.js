@@ -40,7 +40,7 @@ class HardwareIOService {
         this._pinMeta[pinNum].state = constants.OUTLET_ON;
         this._pinMeta[pinNum].lastSwitched = millisNow;
         logger.debug(`Pin ${pinNum} ON`);
-        rpio.write(12, rpio.HIGH);
+        rpio.write(pinNum, rpio.HIGH);
         // process.stdout.write("\x1B[1;1H");
         // process.stdout.write(`Pin ${pinNum} ON`);
         break;
@@ -48,7 +48,7 @@ class HardwareIOService {
         this._pinMeta[pinNum].state = constants.OUTLET_OFF;
         this._pinMeta[pinNum].lastSwitched = millisNow;
         logger.debug(`Pin ${pinNum} OFF`);
-        rpio.write(12, rpio.LOW);
+        rpio.write(pinNum, rpio.LOW);
         // process.stdout.write("\x1B[1;1H");
         // process.stdout.write(`Pin ${pinNum} OFF`);
         break;
