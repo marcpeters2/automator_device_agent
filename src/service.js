@@ -1,6 +1,7 @@
 import _ from 'lodash';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as childProcess from 'child_process';
 import Promise from 'bluebird';
 import { config } from './config';
 import constants from './constants';
@@ -18,6 +19,7 @@ const MIN_OPERATION_TIME = 2000;
 const authToken = fs.readFileSync(path.join(__dirname, "..", "/auth_token.txt"));
 const softwareVersion = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "/package.json")).toString()).version;
 const bootTime = new Date();
+const commitHash = childProcess.execSync('git rev-parse HEAD').toString().trim();
 
 let SYSTEM_STATE = null,
   lastCommandRefreshTimestamp = 0,
@@ -202,6 +204,7 @@ function processCommands(payload) {
 function sendStatus() {
   const payload = {
     softwareVersion,
+    commitHash,
     bootTime: bootTime.toISOString(),
     deviceTime: new Date().toISOString(),
     applicationTime: new Date(TimeService.getTime()).toISOString(),
