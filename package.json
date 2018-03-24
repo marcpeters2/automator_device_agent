@@ -35,7 +35,7 @@
     "nes": "^7.0.2",
     "request": "^2.83.0",
     "request-promise": "^4.2.2",
-    "rpio": "^0.9.19"
+    "rpio": "^0.9.21"
   },
   "devDependencies": {
     "chai": "4.1.2",
