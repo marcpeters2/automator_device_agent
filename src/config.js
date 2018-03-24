@@ -31,10 +31,10 @@ function getConfig() {
   }
 
   configuration.OUTLETS = [
-    {internalName: "A", type: constants.OUTLET_TYPE_ELECTRIC, pin: 0},
-    {internalName: "B", type: constants.OUTLET_TYPE_ELECTRIC, pin: 1},
-    {internalName: "C", type: constants.OUTLET_TYPE_HYDRAULIC, pin: 2},
-    {internalName: "D", type: constants.OUTLET_TYPE_HYDRAULIC, pin: 3},
+    {internalName: "A", type: constants.OUTLET_TYPE_ELECTRIC, pin: 29},
+    {internalName: "B", type: constants.OUTLET_TYPE_ELECTRIC, pin: 31},
+    {internalName: "C", type: constants.OUTLET_TYPE_HYDRAULIC, pin: 33},
+    {internalName: "D", type: constants.OUTLET_TYPE_HYDRAULIC, pin: 35},
   ];
 
   return configuration;

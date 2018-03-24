@@ -6,12 +6,19 @@ import { config } from '../config';
 
 const rpio = require('rpio');
 
-//TODO: Remove, just testing
-rpio.open(12, rpio.OUTPUT, rpio.LOW);
 
 class HardwareIOService {
 
   constructor () {
+    rpio.init({
+      mapping: "physical",
+      gpiomem: false
+    });
+
+    config.OUTLETS.forEach((outlet) => {
+      rpio.open(outlet.pin, rpio.OUTPUT, rpio.LOW);
+    });
+
     this._pinMeta = _.fromPairs(config.OUTLETS.map(outlet => [outlet.pin, {lastSwitched: 0, state: constants.OUTLET_OFF}]));
   }
 
