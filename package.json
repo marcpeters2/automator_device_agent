@@ -1,5 +1,5 @@
 {
-  "name": "controller_agent",
+  "name": "automator_device_agent",
   "version": "0.1.6",
   "description": "A service which runs on a device and executes commands from the network",
   "main": "src/server.js",
@@ -12,15 +12,17 @@
     "tdd": "gulp tdd",
     "start": "gulp start",
     "watch": "gulp watch",
+    "svc:stop": "sudo systemctl stop process-controller-agent",
+    "svc:start": "sudo systemctl start process-controller-agent",
     "svc:status": "sudo journalctl -u process-controller-agent.service -f"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://marcpeters@bitbucket.org/marcpeters/controller_agent.git"
+    "url": "git+https://marcpeters@bitbucket.org/marcpeters/automator_device_agent.git"
   },
   "author": "Marc Peters",
   "license": "ISC",
-  "homepage": "https://bitbucket.org/marcpeters/controller_agent#readme",
+  "homepage": "https://bitbucket.org/marcpeters/automator_device_agent#readme",
   "dependencies": {
     "CBuffer": "^2.0.0",
     "babel-cli": "6.26.0",
