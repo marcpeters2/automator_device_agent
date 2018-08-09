@@ -24,6 +24,7 @@ const commitHash = childProcess.execSync('git rev-parse HEAD').toString().trim()
 let SYSTEM_STATE = null,
   lastCommandRefreshTimestamp = 0,
   nextCommandRefreshTimestamp = 0,
+  lastHearbeat = 0,
   websocketClient = null,
   machineId = null;
 
@@ -33,6 +34,42 @@ function transitionTo(state) {
 
   logger.info(`>>> Transitioning to state ${state}`);
   SYSTEM_STATE = state;
+}
+
+
+function sleep(ms) {
+  return Promise.delay(ms);
+}
+
+
+function shouldRequestNewCommands() {
+  const now = TimeService.getTime(),
+    timeSinceLastCommandRefresh = now - lastCommandRefreshTimestamp;
+
+  if (timeSinceLastCommandRefresh < constants.COMMAND_REFRESH_MIN_INTERVAL_MS) {
+    return false;
+  }
+
+  if (nextCommandRefreshTimestamp <= now) {
+    return true;
+  } else if (timeSinceLastCommandRefresh >= constants.COMMAND_REFRESH_MAX_INTERVAL_MS) {
+    return true;
+  }
+
+  return false;
+}
+
+
+function shouldHeartbeat() {
+  const now = TimeService.getTime(),
+    timeSinceLastHeartbeat = now - lastHearbeat;
+
+  if (timeSinceLastHeartbeat < constants.HEARTBEAT_MIN_INTERVAL_MS) {
+    return false;
+  } else if (timeSinceLastHeartbeat >= constants.HEARTBEAT_MAX_INTERVAL_MS) {
+    return true;
+  }
+  return false;
 }
 
 
@@ -135,24 +172,12 @@ function run() {
       break;
 
     case constants.SYSTEM_STATE.OPERATING:
-      const now = TimeService.getTime(),
-        timeSinceLastCommandRefresh = now - lastCommandRefreshTimestamp;
-
-      if (timeSinceLastCommandRefresh < constants.COMMAND_REFRESH_MIN_INTERVAL_MS) {
-        _operation = Promise.delay(500);
-        break;
-      }
-
-      if (nextCommandRefreshTimestamp > now) {
-        if (timeSinceLastCommandRefresh >= constants.COMMAND_REFRESH_MAX_INTERVAL_MS) {
-          _operation = fetchCommands();
-        }
-        else {
-          _operation = Promise.delay(500);
-        }
-      }
-      else {
+      if (shouldRequestNewCommands()) {
         _operation = fetchCommands();
+      } else if (shouldHeartbeat()) {
+        _operation = heartbeat();
+      } else {
+        _operation = sleep(500);
       }
 
       break;
@@ -172,7 +197,7 @@ function run() {
         delay = MIN_OPERATION_TIME;
       }
 
-      return Promise.delay(delay);
+      return sleep(delay);
     })
     .then(() => {
       run();
@@ -186,6 +211,17 @@ function fetchCommands() {
   }).then(({payload}) => {
     logger.info("Fetched commands from server");
     processCommands(payload);
+  });
+}
+
+
+function heartbeat() {
+  return websocketClient.request({
+    path: `/controllers/${machineId}/heartbeat`,
+    method: "POST"
+  }).then(() => {
+    logger.debug("Heartbeat");
+    lastHearbeat = TimeService.getTime();
   });
 }
 
@@ -208,6 +244,7 @@ function sendStatus() {
     bootTime: bootTime.toISOString(),
     deviceTime: new Date().toISOString(),
     applicationTime: new Date(TimeService.getTime()).toISOString(),
+    lastHeartbeat: new Date(lastHearbeat).toISOString(),
     ipAddresses: getLocalIpAddresses(),
     commands: CommandService.getCommands(),
     pinState: HardwareIOService.getPinState(),
