@@ -108,12 +108,12 @@ class HardwareIOService {
   }
 
 
-  getLatestSwitchingHistoryTime() {
+  getLatestSwitchingHistoryTimestamp() {
     return this._switchingHistory.reduce((acc, historyItem) => {
-      if (historyItem.time < acc) {
+      if (historyItem.time.getTime() < acc) {
         return acc;
       }
-      return historyItem.time;
+      return historyItem.time.getTime();
     }, 0);
   }
 
@@ -123,12 +123,12 @@ class HardwareIOService {
   }
 
 
-  clearSwitchingHistory(onOrBeforeTime) {
+  clearSwitchingHistory(onOrBeforeTimestamp) {
     const currentSwitchingHistory = this._getSwitchingHistoryExcludingOverflow();
     this._initializeSwitchingHistory();
 
     currentSwitchingHistory.forEach((historyItem) => {
-      if (historyItem.time > onOrBeforeTime) {
+      if (historyItem.time.getTime() > onOrBeforeTimestamp) {
         this._switchingHistory.push(historyItem);
       }
     })

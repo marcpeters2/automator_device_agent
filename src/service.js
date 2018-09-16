@@ -250,7 +250,7 @@ function heartbeat() {
 
 function reportOutletHistory() {
   const outletHistory = HardwareIOService.getSwitchingHistory();
-  const cutoffTime = HardwareIOService.getLatestSwitchingHistoryTime();
+  const cutoffTimestamp = HardwareIOService.getLatestSwitchingHistoryTimestamp();
 
   if (outletHistory.length === 0) {
     return Promise.resolve();
@@ -261,15 +261,15 @@ function reportOutletHistory() {
     method: "POST",
     payload: {history: outletHistory}
   }).then(() => {
-    logger.debug(`Sent outlet history (${outletHistory.length} records)`);
-    HardwareIOService.clearSwitchingHistory(cutoffTime);
+    logger.info(`Sent outlet history (${outletHistory.length} records)`);
+    HardwareIOService.clearSwitchingHistory(cutoffTimestamp);
     lastOutletHistoryReportTimestamp = TimeService.getTime();
   }).catch((err) => {
-    if (_.get(err, "data.statusCode") === 409) {
+    if (_.get(err, "data.statusCode") === 422) {
       // Server already saw some of the history records that we sent.  This is OK.
-      logger.debug(`Sent outlet history (${outletHistory.length} records)`);
+      logger.info(`Sent outlet history (${outletHistory.length} records)`);
       logger.warn("Server indicated that some outlet history records were already seen");
-      HardwareIOService.clearSwitchingHistory(cutoffTime);
+      HardwareIOService.clearSwitchingHistory(cutoffTimestamp);
       lastOutletHistoryReportTimestamp = TimeService.getTime();
       return;
     }
