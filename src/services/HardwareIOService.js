@@ -1,6 +1,6 @@
 import * as _ from 'lodash';
-// import * as tty from 'tty';
 import logger from './Logger'
+import TimeService from './TimeService';
 import constants from '../constants';
 import { config } from '../config';
 
@@ -19,7 +19,8 @@ class HardwareIOService {
       rpio.open(outlet.pin, rpio.OUTPUT, rpio.LOW);
     });
 
-    this._pinMeta = _.fromPairs(config.OUTLETS.map(outlet => [outlet.pin, {lastSwitched: 0, state: constants.OUTLET_OFF}]));
+    this._pinMeta = _.fromPairs(config.OUTLETS.map(outlet => [outlet.pin, {lastSwitched: 0, state: constants.OUTLET_STATE_OFF}]));
+    this._initializeSwitchingHistory();
   }
 
 
@@ -27,7 +28,6 @@ class HardwareIOService {
     const millisNow = new Date().getTime();
 
     if (this._pinMeta[pinNum].state === state) {
-      // logger.debug(`Won't switch pin ${pinNum}: switching too fast`);
       return;
     }
     else if(this._pinMeta[pinNum].lastSwitched + constants.OUTLET_MIN_SWITCHING_INTERVAL_MS > millisNow) {
@@ -36,16 +36,16 @@ class HardwareIOService {
     }
 
     switch(state) {
-      case constants.OUTLET_ON:
-        this._pinMeta[pinNum].state = constants.OUTLET_ON;
+      case constants.OUTLET_STATE_ON:
+        this._pinMeta[pinNum].state = constants.OUTLET_STATE_ON;
         this._pinMeta[pinNum].lastSwitched = millisNow;
         logger.debug(`Pin ${pinNum} ON`);
         rpio.write(pinNum, rpio.HIGH);
         // process.stdout.write("\x1B[1;1H");
         // process.stdout.write(`Pin ${pinNum} ON`);
         break;
-      case constants.OUTLET_OFF:
-        this._pinMeta[pinNum].state = constants.OUTLET_OFF;
+      case constants.OUTLET_STATE_OFF:
+        this._pinMeta[pinNum].state = constants.OUTLET_STATE_OFF;
         this._pinMeta[pinNum].lastSwitched = millisNow;
         logger.debug(`Pin ${pinNum} OFF`);
         rpio.write(pinNum, rpio.LOW);
@@ -55,6 +55,83 @@ class HardwareIOService {
       default:
         throw new Error(`setPinState: Unknown pin state ${state}`);
     }
+
+    this._recordSwitchingHistory(pinNum, state);
+  }
+
+  _recordSwitchingHistory(pinNum, state) {
+    this._switchingHistory.push({
+      outletInternalId: pinNum,
+      time: new Date(TimeService.getTime()),
+      state: String(state ? constants.OUTLET_STATE_ON_STRING : constants.OUTLET_STATE_OFF_STRING),
+    });
+
+    this._handleSwitchingHistoryOverflow();
+  }
+
+
+  _handleSwitchingHistoryOverflow() {
+    const numElementsToRemove = this._switchingHistory.length - constants.MAX_OUTLET_HISTORY_ENTRIES;
+
+    if (numElementsToRemove <= 0) {
+      return;
+    }
+
+    const removedElements = this._switchingHistory.splice(0, numElementsToRemove);
+
+    for (const removedElement of removedElements) {
+      if (!_.isEmpty(this._switchingHistoryOverflow[removedElement.outletInternalId])) {
+        // Overflow already occurred for this pin number, and we recorded it
+        continue;
+      }
+
+      const outletHistoryUnknownFromDate = new Date(removedElement.time.getTime() + 1);
+      this._switchingHistoryOverflow[removedElement.outletInternalId].push(removedElement);
+      this._switchingHistoryOverflow[removedElement.outletInternalId].push({
+        outletInternalId: removedElement.outletInternalId,
+        time: outletHistoryUnknownFromDate,
+        state: constants.OUTLET_STATE_UNKNOWN_STRING
+      });
+
+      logger.warn(`Outlet history discarded for pin ${removedElement.outletInternalId} from ${outletHistoryUnknownFromDate.toISOString()}`);
+    }
+  }
+
+
+  getSwitchingHistory() {
+    return _.flatten(_.values(this._switchingHistoryOverflow)).concat(this._switchingHistory);
+  }
+
+
+  _getSwitchingHistoryExcludingOverflow() {
+    return this._switchingHistory;
+  }
+
+
+  getLatestSwitchingHistoryTime() {
+    return this._switchingHistory.reduce((acc, historyItem) => {
+      if (historyItem.time < acc) {
+        return acc;
+      }
+      return historyItem.time;
+    }, 0);
+  }
+
+  _initializeSwitchingHistory() {
+    this._switchingHistory = [];
+    this._switchingHistoryOverflow = _.fromPairs(config.OUTLETS.map(outlet => [outlet.pin, []]));
+  }
+
+
+  clearSwitchingHistory(onOrBeforeTime) {
+    const currentSwitchingHistory = this._getSwitchingHistoryExcludingOverflow();
+    this._initializeSwitchingHistory();
+
+    currentSwitchingHistory.forEach((historyItem) => {
+      if (historyItem.time > onOrBeforeTime) {
+        this._switchingHistory.push(historyItem);
+      }
+    })
   }
 
 

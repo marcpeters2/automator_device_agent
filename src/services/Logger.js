@@ -1,4 +1,5 @@
 import CBuffer from "CBuffer";
+import constants from "../constants";
 const CircularBuffer = CBuffer;
 
 export const logLevels = {
@@ -27,7 +28,7 @@ function toString(logLevel) {
 class Logger {
 
   constructor() {
-    this._history = new CircularBuffer(200);
+    this._history = new CircularBuffer(constants.MAX_LOG_ENTRIES);
   }
 
   setLevel(level) {

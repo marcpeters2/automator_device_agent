@@ -97,7 +97,7 @@ class CommandService {
         const commandsForOutlet = self._commands[outlet.pin];
 
         if(!commandsForOutlet) {
-          HardwareIOService.setPinState(outlet.pin, constants.OUTLET_OFF);
+          HardwareIOService.setPinState(outlet.pin, constants.OUTLET_STATE_OFF);
           return;
         }
 
@@ -116,8 +116,8 @@ class CommandService {
 
         if(activeCommand) {
           switch (activeCommand.state) {
-            case constants.OUTLET_OFF:
-            case constants.OUTLET_ON:
+            case constants.OUTLET_STATE_OFF:
+            case constants.OUTLET_STATE_ON:
               HardwareIOService.setPinState(outlet.pin, activeCommand.state);
               break;
             default:
@@ -126,7 +126,7 @@ class CommandService {
           }
         }
         else {
-          HardwareIOService.setPinState(outlet.pin, constants.OUTLET_OFF);
+          HardwareIOService.setPinState(outlet.pin, constants.OUTLET_STATE_OFF);
           return;
         }
       });

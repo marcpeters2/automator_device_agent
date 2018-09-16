@@ -24,7 +24,8 @@ const commitHash = childProcess.execSync('git rev-parse HEAD').toString().trim()
 let SYSTEM_STATE = null,
   lastCommandRefreshTimestamp = 0,
   nextCommandRefreshTimestamp = 0,
-  lastHearbeat = 0,
+  lastHearbeatTimestamp = 0,
+  lastOutletHistoryReportTimestamp = 0,
   websocketClient = null,
   machineId = null;
 
@@ -62,11 +63,24 @@ function shouldRequestNewCommands() {
 
 function shouldHeartbeat() {
   const now = TimeService.getTime(),
-    timeSinceLastHeartbeat = now - lastHearbeat;
+    timeSinceLastHeartbeat = now - lastHearbeatTimestamp;
 
   if (timeSinceLastHeartbeat < constants.HEARTBEAT_MIN_INTERVAL_MS) {
     return false;
   } else if (timeSinceLastHeartbeat >= constants.HEARTBEAT_MAX_INTERVAL_MS) {
+    return true;
+  }
+  return false;
+}
+
+
+function shouldSendOutletHistory() {
+  const now = TimeService.getTime(),
+    timeSinceLastOutletHistoryWasSent = now - lastOutletHistoryReportTimestamp;
+
+  if (timeSinceLastOutletHistoryWasSent < constants.OUTLET_HISTORY_REPORT_INTERVAL_MS) {
+    return false;
+  } else if (timeSinceLastOutletHistoryWasSent >= constants.OUTLET_HISTORY_REPORT_INTERVAL_MS) {
     return true;
   }
   return false;
@@ -176,6 +190,8 @@ function run() {
         _operation = fetchCommands();
       } else if (shouldHeartbeat()) {
         _operation = heartbeat();
+      } else if (shouldSendOutletHistory()) {
+        _operation = reportOutletHistory();
       } else {
         _operation = sleep(500);
       }
@@ -221,7 +237,37 @@ function heartbeat() {
     method: "POST"
   }).then(() => {
     logger.debug("Heartbeat");
-    lastHearbeat = TimeService.getTime();
+    lastHearbeatTimestamp = TimeService.getTime();
+  });
+}
+
+
+function reportOutletHistory() {
+  const outletHistory = HardwareIOService.getSwitchingHistory();
+  const cutoffTime = HardwareIOService.getLatestSwitchingHistoryTime();
+
+  if (outletHistory.length === 0) {
+    return Promise.resolve();
+  }
+
+  return websocketClient.request({
+    path: `/controllers/${machineId}/outlets/history`,
+    method: "POST",
+    payload: {history: outletHistory}
+  }).then(() => {
+    logger.debug(`Sent outlet history (${outletHistory.length} records)`);
+    HardwareIOService.clearSwitchingHistory(cutoffTime);
+    lastOutletHistoryReportTimestamp = TimeService.getTime();
+  }).catch((err) => {
+    if (_.get(err, "data.statusCode") === 409) {
+      // Server already saw some of the history records that we sent.  This is OK.
+      logger.debug(`Sent outlet history (${outletHistory.length} records)`);
+      logger.warn("Server indicated that some outlet history records were already seen");
+      HardwareIOService.clearSwitchingHistory(cutoffTime);
+      lastOutletHistoryReportTimestamp = TimeService.getTime();
+      return;
+    }
+    throw err;
   });
 }
 
@@ -244,7 +290,7 @@ function sendStatus() {
     bootTime: bootTime.toISOString(),
     deviceTime: new Date().toISOString(),
     applicationTime: new Date(TimeService.getTime()).toISOString(),
-    lastHeartbeat: new Date(lastHearbeat).toISOString(),
+    lastHeartbeat: new Date(lastHearbeatTimestamp).toISOString(),
     ipAddresses: getLocalIpAddresses(),
     commands: CommandService.getCommands(),
     pinState: HardwareIOService.getPinState(),
