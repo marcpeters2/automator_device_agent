@@ -227,6 +227,9 @@ function fetchCommands() {
   }).then(({payload}) => {
     logger.info("Fetched commands from server");
     processCommands(payload);
+  }).catch((err) => {
+    logger.error("**** Error fetching commands");
+    throw err;
   });
 }
 
@@ -238,6 +241,9 @@ function heartbeat() {
   }).then(() => {
     logger.debug("Heartbeat");
     lastHearbeatTimestamp = TimeService.getTime();
+  }).catch((err) => {
+    logger.error("**** Error sending heartbeat");
+    throw err;
   });
 }
 
@@ -267,6 +273,7 @@ function reportOutletHistory() {
       lastOutletHistoryReportTimestamp = TimeService.getTime();
       return;
     }
+    logger.error("**** Error sending outlet history");
     throw err;
   });
 }
