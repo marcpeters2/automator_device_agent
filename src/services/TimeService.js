@@ -1,4 +1,4 @@
-import logger from './Logger';
+const logger = require('./Logger');
 
 
 class TimeService {
@@ -20,4 +20,4 @@ class TimeService {
 
 const singleton = new TimeService();
 
-export default singleton;
+module.exports = singleton;

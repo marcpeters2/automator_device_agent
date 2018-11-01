@@ -1,8 +1,8 @@
-import CBuffer from "CBuffer";
-import constants from "../constants";
+const CBuffer = require("CBuffer");
+const constants = require("../constants");
 const CircularBuffer = CBuffer;
 
-export const logLevels = {
+const logLevels = {
   debug: 4,
   info: 3,
   warn: 2,
@@ -29,6 +29,7 @@ class Logger {
 
   constructor() {
     this._history = new CircularBuffer(constants.MAX_LOG_ENTRIES);
+    this.logLevels = logLevels;
   }
 
   setLevel(level) {
@@ -85,4 +86,4 @@ class Logger {
 const singleton = new Logger();
 singleton.setLevel(logLevels.debug);
 
-export default singleton;
+module.exports = singleton;

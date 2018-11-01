@@ -1,4 +1,4 @@
-import constants from './constants'
+const constants = require('./constants');
 
 function getConfig() {
 
@@ -42,4 +42,4 @@ function getConfig() {
 
 const config = getConfig();
 
-export { config };
+module.exports = { config };

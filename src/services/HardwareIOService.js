@@ -1,9 +1,8 @@
-import * as _ from 'lodash';
-import logger from './Logger'
-import TimeService from './TimeService';
-import constants from '../constants';
-import { config } from '../config';
-
+const _ = require('lodash');
+const logger = require('./Logger');
+const TimeService = require('./TimeService');
+const constants = require('../constants');
+const { config } = require('../config');
 const rpio = require('rpio');
 
 
@@ -161,4 +160,4 @@ class HardwareIOService {
 
 const singleton = new HardwareIOService();
 
-export default singleton;
+module.exports = singleton;

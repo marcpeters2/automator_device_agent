@@ -1,9 +1,9 @@
-import * as _ from 'lodash';
-import HardwareIOService from './HardwareIOService';
-import TimeService from './TimeService';
-import logger from './Logger'
-import { config } from '../config'
-import constants from '../constants'
+const _ = require('lodash');
+const HardwareIOService = require('./HardwareIOService');
+const TimeService = require('./TimeService');
+const logger = require('./Logger');
+const { config } = require('../config');
+const constants = require('../constants');
 
 class CommandService {
 
@@ -143,4 +143,4 @@ class CommandService {
 
 const singleton = new CommandService();
 
-export default singleton;
+module.exports = singleton;

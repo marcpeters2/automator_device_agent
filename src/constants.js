@@ -37,5 +37,5 @@ const constants = {
 
 constants.ALL_OUTLET_TYPES = [constants.OUTLET_TYPE_ELECTRIC, constants.OUTLET_TYPE_HYDRAULIC];
 
-export default constants;
+module.exports = constants;
 

@@ -1,10 +1,8 @@
-import {spawn} from 'child_process';
-import env from 'gulp-env';
-import gulp from 'gulp';
-import babel from 'gulp-babel';
-import sourceMaps from 'gulp-sourcemaps';
-import nodemon from 'gulp-nodemon';
-import mocha from 'gulp-mocha';
+const {spawn} = require('child_process');
+const env = require('gulp-env');
+const gulp = require('gulp');
+const nodemon = require('gulp-nodemon');
+const mocha = require('gulp-mocha');
 
 function defaultToLocalNodeEnv () {
   env({
@@ -16,45 +14,13 @@ function defaultToLocalNodeEnv () {
 
 defaultToLocalNodeEnv();
 
-const {config} = require('./src/config');
 const srcPattern = 'src/**/*',
   testSrcPattern = 'tests/**/*',
-  copyPatterns = ['auth_token.txt', 'package.json'],
-  entryPoint = 'dist/src/service.js';
-let neverExit = false,
-  buildError = false;
+  entryPoint = 'src/service.js';
+let neverExit = false;
 
 
-gulp.task('build', ['copy'], () => {
-  buildError = false;
-
-  return gulp.src([srcPattern, testSrcPattern], {base: '.'})
-    .pipe(sourceMaps.init())
-    .pipe(babel({
-      presets: ['env'],
-    }))
-    .on('error', function(err) {
-      if (neverExit) {
-        console.log(err);
-        buildError = true;
-        this.emit('end');
-      } else {
-        console.log(err);
-        process.exit(1);
-      }
-    })
-    .pipe(sourceMaps.write('.'))
-    .pipe(gulp.dest('dist'));
-});
-
-
-gulp.task('copy', () => {
-  return gulp.src(copyPatterns, {base: '.'})
-    .pipe(gulp.dest('dist'));
-});
-
-
-gulp.task('start', ['build'], (cb) => {
+gulp.task('start', (cb) => {
   const serverProcess = spawn('node', [entryPoint]);
 
   serverProcess.stdout.on('data', (data) => {
@@ -75,9 +41,8 @@ gulp.task('start', ['build'], (cb) => {
 gulp.task('watch', () => {
   const stream = nodemon({
     script: entryPoint,
-    tasks: ['build'],
     ext: 'js',
-    ignore: ['dist/**/*', testSrcPattern]
+    ignore: [testSrcPattern]
   });
 
   stream
@@ -91,14 +56,10 @@ gulp.task('watch', () => {
 });
 
 
-gulp.task('test', ['build'], () => {
+gulp.task('test', () => {
   env({vars: {NODE_ENV: "test"}});
 
-  if(buildError) {
-    return;
-  }
-
-  return gulp.src('dist/tests/**/*.js')
+  return gulp.src('tests/**/*.js')
     .pipe(mocha())
     .on('error', function(err) {
       if (neverExit) {

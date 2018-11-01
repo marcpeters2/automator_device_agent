@@ -1,17 +1,18 @@
-import _ from 'lodash';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as childProcess from 'child_process';
-import Promise from 'bluebird';
-import { config } from './config';
-import constants from './constants';
-import {getLocalIpAddresses} from './helpers/ipAddress';
-import {subscribeOnce} from "./helpers/websocket";
-import logger, {logLevels} from './services/Logger';
-import TimeService from './services/TimeService';
-import CommandService from './services/CommandService';
-import HardwareIOService from './services/HardwareIOService';
-import Nes from 'nes';
+const _ = require('lodash');
+const fs = require('fs');
+const path = require('path');
+const childProcess = require('child_process');
+const Promise = require('bluebird');
+const { config } = require('./config');
+const constants = require('./constants');
+const {getLocalIpAddresses} = require('./helpers/ipAddress');
+const {subscribeOnce} = require("./helpers/websocket");
+const logger = require('./services/Logger');
+const {logLevels} = logger;
+const TimeService = require('./services/TimeService');
+const CommandService = require('./services/CommandService');
+const HardwareIOService = require('./services/HardwareIOService');
+const Nes = require('nes');
 
 logger.setLevel(logLevels.info);
 
@@ -21,22 +22,13 @@ const softwareVersion = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "/
 const bootTime = new Date();
 const commitHash = childProcess.execSync('git rev-parse HEAD').toString().trim();
 
-let SYSTEM_STATE = null,
-  lastCommandRefreshTimestamp = 0,
+let lastCommandRefreshTimestamp = 0,
   nextCommandRefreshTimestamp = 0,
   lastHearbeatTimestamp = 0,
   lastOutletHistoryReportTimestamp = 0,
   websocketClient = null,
   machineId = null,
   didSignalBoot = false;
-
-
-function transitionTo(state) {
-  if (SYSTEM_STATE === state) { return; }
-
-  logger.info(`>>> Transitioning to state ${state}`);
-  SYSTEM_STATE = state;
-}
 
 
 function sleep(ms) {
@@ -88,156 +80,160 @@ function shouldSendOutletHistory() {
 }
 
 
-transitionTo(constants.SYSTEM_STATE.INITIALIZING);
 
-function run() {
-
-  let _operation;
-
-  switch (SYSTEM_STATE) {
-    case constants.SYSTEM_STATE.INITIALIZING:
-      _operation = Promise.resolve()
-        .then(() => {
-          const websocketProtocol = config.USE_SECURE_WEBSOCKETS === false ? "ws" : "wss";
-          websocketClient = new Nes.Client(`${websocketProtocol}://${config.API_HOST}:${config.API_PORT}`, {
-            timeout: constants.HTTP_REQUEST_TIMEOUT_MS
-          });
-          websocketClient.onConnect = () => {
-            logger.info("******** WEBSOCKET CONNECTED");
-          };
-          websocketClient.onDisconnect = () => {
-            logger.warn("******** WEBSOCKET DISCONNECTED");
-            // Websocket has disconnected. When it reconnects, refresh commands immediately
-            nextCommandRefreshTimestamp = TimeService.getTime();
-          };
-          websocketClient.onError = (err) => {
-            logger.warn("******** WEBSOCKET ERROR");
-            transitionTo(constants.SYSTEM_STATE.CONNECTING_WEBSOCKET);
-          };
-
-          transitionTo(constants.SYSTEM_STATE.CONNECTING_WEBSOCKET);
-        });
-      break;
-
-    case constants.SYSTEM_STATE.CONNECTING_WEBSOCKET:
-      _operation =  websocketClient.disconnect()
-        .then(() => {
-          return websocketClient.connect({
-            auth: {headers: {authorization: `Bearer ${authToken}`}},
-            timeout: constants.HTTP_REQUEST_TIMEOUT_MS
-          });
-        })
-        .then(() => transitionTo(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES));
-      break;
-
-    case constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES:
-      const payload = {};
-
-      constants.ALL_OUTLET_TYPES.forEach((outletType) => {
-        const outletsOfType = config.OUTLETS.filter((outlet) => outlet.type === outletType);
-        if (outletsOfType.length === 0) return;
-        payload[outletType] = {};
-        outletsOfType.forEach(outlet => {
-          _.set(payload, `${outletType}.${outlet.pin}`, outlet.internalName);
-        })
-      });
-
-      _operation = websocketClient.request({
-          method: "POST",
-          path: "/controllers",
-          payload,
-        })
-        .then(({payload: {id}}) => {
-          logger.info(`Received id ${id}`);
-          machineId = id;
-
-          return subscribeOnce(websocketClient, `/controllers/${machineId}/status`, (update, flags) => {
-              logger.info("****** Sending status data");
-              sendStatus();
-            })
-            .then(() => {
-              if (!didSignalBoot) {
-                return transitionTo(constants.SYSTEM_STATE.SIGNAL_DEVICE_BOOT);
-              } else {
-                return transitionTo(constants.SYSTEM_STATE.SYNCING_TIME)
-              }
-            });
-        });
-      break;
-
-    case constants.SYSTEM_STATE.SIGNAL_DEVICE_BOOT:
-      _operation = websocketClient.request({
-          method: "POST",
-          path: `/controllers/${machineId}/boot`,
-        })
-        .then(() => {
-          logger.info(`Signalled device boot`);
-          didSignalBoot = true;
-          return transitionTo(constants.SYSTEM_STATE.SYNCING_TIME);
-        });
-      break;
-
-    case constants.SYSTEM_STATE.SYNCING_TIME:
-      const start = new Date().getTime();
-
-      _operation = websocketClient.request({
-        path: "/time"
-      })
-        .then(({payload: {time}}) => {
-          const end = new Date().getTime(),
-            estimatedLatency = Math.trunc((start - end) / 2);
-          TimeService.resetTime(time - estimatedLatency);
-
-         subscribeOnce(websocketClient, `/controllers/${machineId}/commands`, (update, flags) => {
-              logger.info("Received new commands from server");
-              processCommands(update);
-            })
-            .then(() => transitionTo(constants.SYSTEM_STATE.STARTING_IO_TASK));
-        });
-      break;
-
-    case constants.SYSTEM_STATE.STARTING_IO_TASK:
-      _operation = fetchCommands()
-        .then(() => {
-          CommandService.startBackgroundTask();
-          transitionTo(constants.SYSTEM_STATE.OPERATING);
-        });
-      break;
-
-    case constants.SYSTEM_STATE.OPERATING:
-      if (shouldRequestNewCommands()) {
-        _operation = fetchCommands();
-      } else if (shouldHeartbeat()) {
-        _operation = heartbeat();
-      } else if (shouldSendOutletHistory()) {
-        _operation = reportOutletHistory();
-      } else {
-        _operation = sleep(500);
-      }
-
-      break;
+class StateMachine {
+  constructor() {
+    this._state = null;
+    this._stateHandlers = {};
   }
 
-  let operationFailed = false;
+  addHandlerForState(state, handler) {
+    this._stateHandlers[state] = handler;
+  }
 
-  _operation
-    .catch((err) => {
-      operationFailed = true;
-      logger.error(err);
-    })
-    .then(() => {
-      let delay = null;
+  changeState(newState) {
+    if (this._state === newState) { return; }
 
-      if (operationFailed) {
-        delay = MIN_OPERATION_TIME;
+    logger.info(`>>> Transitioning to state ${newState}`);
+    this._state = newState;
+  }
+
+  async runForever() {
+    while (true) {
+      try {
+        await this._executeHandlerForCurrentState();
+      } catch (err) {
+        logger.error(err);
+        await sleep(MIN_OPERATION_TIME);
       }
+    }
+  }
 
-      return sleep(delay);
-    })
-    .then(() => {
-      run();
-    });
+  async _executeHandlerForCurrentState() {
+    const operation = this._stateHandlers[this._state];
+
+    if (!operation) {
+      throw new Error(`No handler is registered for state ${this._state}`);
+    }
+
+    await operation({changeState: this.changeState.bind(this)});
+  }
 }
+
+const stateMachine = new StateMachine();
+
+stateMachine.addHandlerForState(constants.SYSTEM_STATE.INITIALIZING, async ({changeState}) => {
+  const websocketProtocol = config.USE_SECURE_WEBSOCKETS === false ? "ws" : "wss";
+  websocketClient = new Nes.Client(`${websocketProtocol}://${config.API_HOST}:${config.API_PORT}`, {
+    timeout: constants.HTTP_REQUEST_TIMEOUT_MS
+  });
+  websocketClient.onConnect = () => {
+    logger.info("******** WEBSOCKET CONNECTED");
+  };
+  websocketClient.onDisconnect = () => {
+    logger.warn("******** WEBSOCKET DISCONNECTED");
+    // Websocket has disconnected. When it reconnects, refresh commands immediately
+    nextCommandRefreshTimestamp = TimeService.getTime();
+  };
+  websocketClient.onError = (err) => {
+    logger.warn("******** WEBSOCKET ERROR");
+    changeState(constants.SYSTEM_STATE.CONNECTING_WEBSOCKET);
+  };
+
+  changeState(constants.SYSTEM_STATE.CONNECTING_WEBSOCKET);
+});
+
+stateMachine.addHandlerForState(constants.SYSTEM_STATE.CONNECTING_WEBSOCKET, async ({changeState}) => {
+  await websocketClient.disconnect();
+  await websocketClient.connect({
+    auth: {headers: {authorization: `Bearer ${authToken}`}},
+    timeout: constants.HTTP_REQUEST_TIMEOUT_MS
+  });
+  changeState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES);
+});
+
+stateMachine.addHandlerForState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES, async ({changeState}) => {
+  const payload = {};
+
+  constants.ALL_OUTLET_TYPES.forEach((outletType) => {
+    const outletsOfType = config.OUTLETS.filter((outlet) => outlet.type === outletType);
+    if (outletsOfType.length === 0) return;
+    payload[outletType] = {};
+    outletsOfType.forEach(outlet => {
+      _.set(payload, `${outletType}.${outlet.pin}`, outlet.internalName);
+    })
+  });
+
+  const {payload: {id}} = await websocketClient.request({
+    method: "POST",
+    path: "/controllers",
+    payload,
+  });
+
+  logger.info(`Received id ${id}`);
+  machineId = id;
+
+  await subscribeOnce(websocketClient, `/controllers/${machineId}/status`, (update, flags) => {
+    logger.info("****** Sending status data");
+    sendStatus();
+  });
+
+  if (!didSignalBoot) {
+    return changeState(constants.SYSTEM_STATE.SIGNAL_DEVICE_BOOT);
+  } else {
+    return changeState(constants.SYSTEM_STATE.SYNCING_TIME);
+  }
+});
+
+stateMachine.addHandlerForState(constants.SYSTEM_STATE.SIGNAL_DEVICE_BOOT, async ({changeState}) => {
+  await websocketClient.request({
+    method: "POST",
+    path: `/controllers/${machineId}/boot`,
+  });
+
+  logger.info(`Signalled device boot`);
+  didSignalBoot = true;
+  return changeState(constants.SYSTEM_STATE.SYNCING_TIME);
+});
+
+stateMachine.addHandlerForState(constants.SYSTEM_STATE.SYNCING_TIME, async ({changeState}) => {
+  const start = new Date().getTime(),
+    {payload: {time}} = await websocketClient.request({
+      path: "/time"
+    }),
+    end = new Date().getTime(),
+    estimatedLatency = Math.trunc((start - end) / 2);
+
+  TimeService.resetTime(time - estimatedLatency);
+
+  await subscribeOnce(websocketClient, `/controllers/${machineId}/commands`, (update, flags) => {
+    logger.info("Received new commands from server");
+    processCommands(update);
+  });
+
+  changeState(constants.SYSTEM_STATE.STARTING_IO_TASK);
+});
+
+stateMachine.addHandlerForState(constants.SYSTEM_STATE.STARTING_IO_TASK, async ({changeState}) => {
+  await fetchCommands();
+  CommandService.startBackgroundTask();
+  changeState(constants.SYSTEM_STATE.OPERATING);
+});
+
+stateMachine.addHandlerForState(constants.SYSTEM_STATE.OPERATING, async ({changeState}) => {
+  if (shouldRequestNewCommands()) {
+    await fetchCommands();
+  } else if (shouldHeartbeat()) {
+    await heartbeat();
+  } else if (shouldSendOutletHistory()) {
+    await reportOutletHistory();
+  } else {
+    await sleep(500);
+  }
+});
+
+stateMachine.changeState(constants.SYSTEM_STATE.INITIALIZING);
+stateMachine.runForever();
 
 
 function fetchCommands() {
@@ -333,5 +329,3 @@ function sendStatus() {
       logger.error(err);
     });
 }
-
-run();
