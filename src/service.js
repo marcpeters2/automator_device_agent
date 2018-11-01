@@ -9,14 +9,16 @@ const {getLocalIpAddresses} = require('./helpers/ipAddress');
 const {subscribeOnce} = require("./helpers/websocket");
 const logger = require('./services/Logger');
 const {logLevels} = logger;
+const sleep = require('./helpers/sleep');
 const TimeService = require('./services/TimeService');
 const CommandService = require('./services/CommandService');
 const HardwareIOService = require('./services/HardwareIOService');
+const StateMachine = require('./services/StateMachine');
+const stateMachine = new StateMachine({logger});
 const Nes = require('nes');
 
 logger.setLevel(logLevels.info);
 
-const MIN_OPERATION_TIME = 2000;
 const authToken = fs.readFileSync(path.join(__dirname, "..", "/auth_token.txt"));
 const softwareVersion = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "/package.json")).toString()).version;
 const bootTime = new Date();
@@ -29,11 +31,6 @@ let lastCommandRefreshTimestamp = 0,
   websocketClient = null,
   machineId = null,
   didSignalBoot = false;
-
-
-function sleep(ms) {
-  return Promise.delay(ms);
-}
 
 
 function shouldRequestNewCommands() {
@@ -78,49 +75,6 @@ function shouldSendOutletHistory() {
   }
   return false;
 }
-
-
-
-class StateMachine {
-  constructor() {
-    this._state = null;
-    this._stateHandlers = {};
-  }
-
-  addHandlerForState(state, handler) {
-    this._stateHandlers[state] = handler;
-  }
-
-  changeState(newState) {
-    if (this._state === newState) { return; }
-
-    logger.info(`>>> Transitioning to state ${newState}`);
-    this._state = newState;
-  }
-
-  async runForever() {
-    while (true) {
-      try {
-        await this._executeHandlerForCurrentState();
-      } catch (err) {
-        logger.error(err);
-        await sleep(MIN_OPERATION_TIME);
-      }
-    }
-  }
-
-  async _executeHandlerForCurrentState() {
-    const operation = this._stateHandlers[this._state];
-
-    if (!operation) {
-      throw new Error(`No handler is registered for state ${this._state}`);
-    }
-
-    await operation({changeState: this.changeState.bind(this)});
-  }
-}
-
-const stateMachine = new StateMachine();
 
 stateMachine.addHandlerForState(constants.SYSTEM_STATE.INITIALIZING, async ({changeState}) => {
   const websocketProtocol = config.USE_SECURE_WEBSOCKETS === false ? "ws" : "wss";
