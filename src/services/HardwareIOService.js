@@ -98,8 +98,27 @@ class HardwareIOService {
   }
 
 
+  _outletStateToString(state) {
+    switch(state) {
+      case constants.OUTLET_STATE_ON:
+        return constants.OUTLET_STATE_ON_STRING;
+      case constants.OUTLET_STATE_OFF:
+        return constants.OUTLET_STATE_OFF_STRING;
+      default:
+        throw new Error(`_pinStateToString: Unknown pin state: ${state}`);
+    }
+  }
+
+
   getSwitchingHistory() {
-    return _.flatten(_.values(this._switchingHistoryOverflow)).concat(this._switchingHistory);
+    const now = TimeService.getTime(),
+      currentPinStates = _.toPairs(this._pinMeta).map(([outletInternalId, pinMeta]) => ({
+        outletInternalId,
+        time: new Date(now),
+        state: this._outletStateToString(pinMeta.state)
+      }));
+
+    return _.flatten(_.values(this._switchingHistoryOverflow)).concat(this._switchingHistory).concat(currentPinStates);
   }
 
 
