@@ -27,7 +27,8 @@ let SYSTEM_STATE = null,
   lastHearbeatTimestamp = 0,
   lastOutletHistoryReportTimestamp = 0,
   websocketClient = null,
-  machineId = null;
+  machineId = null,
+  didSignalBoot = false;
 
 
 function transitionTo(state) {
@@ -154,7 +155,25 @@ function run() {
               logger.info("****** Sending status data");
               sendStatus();
             })
-            .then(() => transitionTo(constants.SYSTEM_STATE.SYNCING_TIME));
+            .then(() => {
+              if (!didSignalBoot) {
+                return transitionTo(constants.SYSTEM_STATE.SIGNAL_DEVICE_BOOT);
+              } else {
+                return transitionTo(constants.SYSTEM_STATE.SYNCING_TIME)
+              }
+            });
+        });
+      break;
+
+    case constants.SYSTEM_STATE.SIGNAL_DEVICE_BOOT:
+      _operation = websocketClient.request({
+          method: "POST",
+          path: `/controllers/${machineId}/boot`,
+        })
+        .then(() => {
+          logger.info(`Signalled device boot`);
+          didSignalBoot = true;
+          return transitionTo(constants.SYSTEM_STATE.SYNCING_TIME);
         });
       break;
 
