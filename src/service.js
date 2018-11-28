@@ -6,7 +6,6 @@ const Promise = require('bluebird');
 const { config } = require('./config');
 const constants = require('./constants');
 const {getLocalIpAddresses} = require('./helpers/ipAddress');
-const {subscribeOnce} = require("./helpers/websocket");
 const logger = require('./services/Logger');
 const {logLevels} = logger;
 const sleep = require('./helpers/sleep');
@@ -15,7 +14,7 @@ const CommandService = require('./services/CommandService');
 const HardwareIOService = require('./services/HardwareIOService');
 const StateMachine = require('./services/StateMachine');
 const stateMachine = new StateMachine({logger});
-const Nes = require('nes');
+const DataTransportService = require('./services/DataTransportService');
 
 logger.setLevel(logLevels.info);
 
@@ -24,11 +23,13 @@ const softwareVersion = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "/
 const bootTime = new Date();
 const commitHash = childProcess.execSync('git rev-parse HEAD').toString().trim();
 
+const dataTransportService = new DataTransportService({config, authToken, logger});
+
+
 let lastCommandRefreshTimestamp = 0,
   nextCommandRefreshTimestamp = 0,
   lastHearbeatTimestamp = 0,
   lastOutletHistoryReportTimestamp = 0,
-  websocketClient = null,
   machineId = null,
   didSignalBoot = false;
 
@@ -77,33 +78,19 @@ function shouldSendOutletHistory() {
 }
 
 stateMachine.addHandlerForState(constants.SYSTEM_STATE.INITIALIZING, async ({changeState}) => {
-  const websocketProtocol = config.USE_SECURE_WEBSOCKETS === false ? "ws" : "wss";
-  websocketClient = new Nes.Client(`${websocketProtocol}://${config.API_HOST}:${config.API_PORT}`, {
-    timeout: constants.HTTP_REQUEST_TIMEOUT_MS
-  });
-  websocketClient.onConnect = () => {
-    logger.info("******** WEBSOCKET CONNECTED");
-  };
-  websocketClient.onDisconnect = () => {
-    logger.warn("******** WEBSOCKET DISCONNECTED");
-    // Websocket has disconnected. When it reconnects, refresh commands immediately
+  dataTransportService.onDisconnect(() => {
     nextCommandRefreshTimestamp = TimeService.getTime();
-  };
-  websocketClient.onError = (err) => {
-    logger.warn("******** WEBSOCKET ERROR");
-    changeState(constants.SYSTEM_STATE.CONNECTING_WEBSOCKET);
-  };
-
-  changeState(constants.SYSTEM_STATE.CONNECTING_WEBSOCKET);
-});
-
-stateMachine.addHandlerForState(constants.SYSTEM_STATE.CONNECTING_WEBSOCKET, async ({changeState}) => {
-  await websocketClient.disconnect();
-  await websocketClient.connect({
-    auth: {headers: {authorization: `Bearer ${authToken}`}},
-    timeout: constants.HTTP_REQUEST_TIMEOUT_MS
   });
-  changeState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES);
+
+  logger.info("-------------- Waiting for websocket connection");
+
+  await new Promise((resolve) => {
+    dataTransportService.onInitialConnect(() => {
+      changeState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES);
+      return resolve();
+    });
+  });
+
 });
 
 stateMachine.addHandlerForState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES, async ({changeState}) => {
@@ -118,7 +105,7 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES, 
     })
   });
 
-  const {payload: {id}} = await websocketClient.request({
+  const {payload: {id}} = await dataTransportService.request({
     method: "POST",
     path: "/controllers",
     payload,
@@ -127,8 +114,8 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES, 
   logger.info(`Received id ${id}`);
   machineId = id;
 
-  await subscribeOnce(websocketClient, `/controllers/${machineId}/status`, (update, flags) => {
-    logger.info("****** Sending status data");
+  await dataTransportService.subscribe(`/controllers/${machineId}/status`, (update, flags) => {
+    logger.info("-------------- Sending status data");
     sendStatus();
   });
 
@@ -140,7 +127,7 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES, 
 });
 
 stateMachine.addHandlerForState(constants.SYSTEM_STATE.SIGNAL_DEVICE_BOOT, async ({changeState}) => {
-  await websocketClient.request({
+  await dataTransportService.request({
     method: "POST",
     path: `/controllers/${machineId}/boot`,
   });
@@ -152,7 +139,7 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.SIGNAL_DEVICE_BOOT, async
 
 stateMachine.addHandlerForState(constants.SYSTEM_STATE.SYNCING_TIME, async ({changeState}) => {
   const start = new Date().getTime(),
-    {payload: {time}} = await websocketClient.request({
+    {payload: {time}} = await dataTransportService.request({
       path: "/time"
     }),
     end = new Date().getTime(),
@@ -160,7 +147,7 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.SYNCING_TIME, async ({cha
 
   TimeService.resetTime(time - estimatedLatency);
 
-  await subscribeOnce(websocketClient, `/controllers/${machineId}/commands`, (update, flags) => {
+  await dataTransportService.subscribe(`/controllers/${machineId}/commands`, (update, flags) => {
     logger.info("Received new commands from server");
     processCommands(update);
   });
@@ -186,34 +173,42 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.OPERATING, async ({change
   }
 });
 
+stateMachine.onError(handleStateMachineError);
 stateMachine.changeState(constants.SYSTEM_STATE.INITIALIZING);
 stateMachine.runForever();
 
 
-function fetchCommands() {
-  return websocketClient.request({
-    path: `/controllers/${machineId}/commands`,
-  }).then(({payload}) => {
+function handleStateMachineError(err) {
+  if (err.message === "Websocket is disconnected") return;
+  logger.error(err);
+}
+
+async function fetchCommands() {
+  try {
+    const {payload} = await dataTransportService.request({
+      path: `/controllers/${machineId}/commands`,
+    });
     logger.info("Fetched commands from server");
     processCommands(payload);
-  }).catch((err) => {
+  } catch (err) {
     logger.error("**** Error fetching commands");
     throw err;
-  });
+  }
 }
 
 
-function heartbeat() {
-  return websocketClient.request({
-    path: `/controllers/${machineId}/heartbeat`,
-    method: "POST"
-  }).then(() => {
+async function heartbeat() {
+  try {
+    await dataTransportService.request({
+      path: `/controllers/${machineId}/heartbeat`,
+      method: "POST"
+    });
     logger.debug("Heartbeat");
     lastHearbeatTimestamp = TimeService.getTime();
-  }).catch((err) => {
+  } catch (err) {
     logger.error("**** Error sending heartbeat");
     throw err;
-  });
+  }
 }
 
 
@@ -225,7 +220,7 @@ function reportOutletHistory() {
     return Promise.resolve();
   }
 
-  return websocketClient.request({
+  return dataTransportService.request({
     path: `/controllers/${machineId}/outlets/history`,
     method: "POST",
     payload: {history: outletHistory}
@@ -273,7 +268,7 @@ function sendStatus() {
     recentLogs: logger.getHistory()
   };
 
-  return websocketClient.request({
+  return dataTransportService.request({
       method: "POST",
       path: `/controllers/${machineId}/status`,
       payload,
