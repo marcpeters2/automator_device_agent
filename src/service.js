@@ -3,7 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
 const Promise = require('bluebird');
-const Nes = require('nes');
 const { config } = require('./config');
 const constants = require('./constants');
 const {getLocalIpAddresses} = require('./helpers/ipAddress');
@@ -15,7 +14,7 @@ const CommandService = require('./services/CommandService');
 const HardwareIOService = require('./services/HardwareIOService');
 const StateMachine = require('./services/StateMachine');
 const stateMachine = new StateMachine({logger});
-const WebsocketTransport = require('./services/WebsocketTransport');
+const NesWebsocketTransport = require('./services/NesWebsocketTransport');
 
 logger.setLevel(logLevels.info);
 
@@ -24,12 +23,7 @@ const softwareVersion = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "/
 const bootTime = new Date();
 const commitHash = childProcess.execSync('git rev-parse HEAD').toString().trim();
 
-const websocketProtocol = config.USE_SECURE_WEBSOCKETS === false ? "ws" : "wss",
-  websocketClient = new Nes.Client(`${websocketProtocol}://${config.API_HOST}:${config.API_PORT}`, {
-    timeout: config.HTTP_REQUEST_TIMEOUT_MS
-  });
-const dataTransport = new WebsocketTransport({config, authToken, logger, websocketClient});
-
+const dataTransport = new NesWebsocketTransport({config, authToken, logger});
 
 let lastCommandRefreshTimestamp = 0,
   nextCommandRefreshTimestamp = 0,
