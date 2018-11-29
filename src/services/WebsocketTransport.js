@@ -1,8 +1,6 @@
 const _ = require("lodash"),
-  Nes = require('nes'),
   Promise = require("bluebird"),
-  {notifyAllListeners} = require("../helpers/events"),
-  constants = require("../constants");
+  {notifyAllListeners} = require("../helpers/events");
 
 const CONNECTION_STATE = {
   CONNECTED: "CONNECTED",
@@ -10,14 +8,10 @@ const CONNECTION_STATE = {
 };
 
 
-class DataTransportService {
+class WebsocketTransport {
 
-  constructor({config, authToken, logger}) {
-    const websocketProtocol = config.USE_SECURE_WEBSOCKETS === false ? "ws" : "wss",
-      websocketClient = new Nes.Client(`${websocketProtocol}://${config.API_HOST}:${config.API_PORT}`, {
-        timeout: constants.HTTP_REQUEST_TIMEOUT_MS
-      });
-
+  constructor({config, authToken, logger, websocketClient}) {
+    this._config = config;
     this._logger = logger;
     this._authToken = authToken;
     this._websocketClient = websocketClient;
@@ -33,7 +27,6 @@ class DataTransportService {
     websocketClient.onError = this._handleError.bind(this);
 
     this._handleInitialConnect = _.once(this._handleInitialConnect);
-    this._connect();
   }
 
   onConnect(callback) {
@@ -75,10 +68,10 @@ class DataTransportService {
 
   _handleError(err) {
     this._logger.debug("-------------- WEBSOCKET ERROR", err);
-    this._connect();
+    this.connect();
   }
 
-  async _connect() {
+  async connect() {
     if (this._connecting) {
       return;
     }
@@ -86,16 +79,17 @@ class DataTransportService {
 
     const reconnect = async () => {
       try {
-        // this._logger.info("Connecting websocket");
+        this._logger.debug("Disconnecting websocket");
         await this._websocketClient.disconnect();
         this._handleDisconnect();
+        this._logger.debug("Connecting websocket");
         await this._websocketClient.connect({
           auth: {headers: {authorization: `Bearer ${this._authToken}`}},
-          timeout: constants.HTTP_REQUEST_TIMEOUT_MS
+          timeout: this._config.HTTP_REQUEST_TIMEOUT_MS
         });
         this._connecting = false;
       } catch (err) {
-        // this._logger.error("Reconnect error");
+        this._logger.debug("Reconnect error");
         await Promise.delay(2000);
         reconnect();
       }
@@ -125,4 +119,4 @@ class DataTransportService {
   }
 }
 
-module.exports = DataTransportService;
+module.exports = WebsocketTransport;

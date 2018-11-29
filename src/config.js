@@ -37,6 +37,8 @@ function getConfig() {
     {internalName: "D", type: constants.OUTLET_TYPE_HYDRAULIC, pin: 35},
   ];
 
+  configuration.HTTP_REQUEST_TIMEOUT_MS = 5000;
+
   return configuration;
 }
 
