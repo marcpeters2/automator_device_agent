@@ -2,9 +2,10 @@
   "name": "automator_device_agent",
   "version": "0.1.6",
   "description": "A service which runs on a device and executes commands from the network",
+  "private": true,
   "main": "src/server.js",
   "engines": {
-    "node": "8.9.1"
+    "node": "~10.13.0"
   },
   "scripts": {
     "test": "gulp test",
@@ -29,8 +30,8 @@
     "gulp-env": "0.4.0",
     "gulp-nodemon": "^2.2.1",
     "lodash": "4.17.4",
-    "nes": "^9.1.0",
-    "rpio": "^0.9.23"
+    "rpio": "^0.9.23",
+    "websocket-transport": "git+ssh://git@bitbucket.org/marcpeters/websocket-transport.git#v1.0.1"
   },
   "devDependencies": {
     "chai": "4.1.2",

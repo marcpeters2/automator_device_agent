@@ -14,7 +14,7 @@ const CommandService = require('./services/CommandService');
 const HardwareIOService = require('./services/HardwareIOService');
 const StateMachine = require('./services/StateMachine');
 const stateMachine = new StateMachine({logger});
-const NesWebsocketTransport = require('./services/NesWebsocketTransport');
+const {NesWebsocketTransport} = require('websocket-transport');
 
 logger.setLevel(logLevels.info);
 
@@ -88,8 +88,8 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.INITIALIZING, async ({cha
     });
   });
 
-  dataTransport.connect();
   logger.info("-------------- Waiting for initial websocket connection");
+  await dataTransport.connect();
   await initialConnection;
 });
 
