@@ -29,9 +29,7 @@
     "gulp-env": "0.4.0",
     "gulp-nodemon": "^2.2.1",
     "lodash": "4.17.4",
-    "nes": "^7.0.2",
-    "request": "^2.83.0",
-    "request-promise": "^4.2.2",
+    "nes": "^9.1.0",
     "rpio": "^0.9.23"
   },
   "devDependencies": {
