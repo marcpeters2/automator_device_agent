@@ -25,13 +25,12 @@
   "homepage": "https://bitbucket.org/marcpeters/automator_device_agent#readme",
   "dependencies": {
     "CBuffer": "^2.0.0",
-    "bluebird": "3.5.1",
     "gulp": "3.9.1",
     "gulp-env": "0.4.0",
     "gulp-nodemon": "^2.2.1",
     "lodash": "4.17.4",
     "rpio": "^0.9.23",
-    "websocket-transport": "git+ssh://git@bitbucket.org/marcpeters/websocket-transport.git#v1.0.1"
+    "websocket-transport": "git+ssh://git@bitbucket.org/marcpeters/websocket-transport.git#v1.0.4"
   },
   "devDependencies": {
     "chai": "4.1.2",

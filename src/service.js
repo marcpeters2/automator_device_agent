@@ -2,7 +2,6 @@ const _ = require('lodash');
 const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
-const Promise = require('bluebird');
 const { config } = require('./config');
 const constants = require('./constants');
 const {getLocalIpAddresses} = require('./helpers/ipAddress');
@@ -24,6 +23,11 @@ const bootTime = new Date();
 const commitHash = childProcess.execSync('git rev-parse HEAD').toString().trim();
 
 const dataTransport = new NesWebsocketTransport({config, authToken, logger});
+
+dataTransport.onDisconnect(() => {
+  nextCommandRefreshTimestamp = TimeService.getTime();
+});
+
 
 let lastCommandRefreshTimestamp = 0,
   nextCommandRefreshTimestamp = 0,
@@ -77,20 +81,8 @@ function shouldSendOutletHistory() {
 }
 
 stateMachine.addHandlerForState(constants.SYSTEM_STATE.INITIALIZING, async ({changeState}) => {
-  dataTransport.onDisconnect(() => {
-    nextCommandRefreshTimestamp = TimeService.getTime();
-  });
-
-  const initialConnection = new Promise((resolve) => {
-    dataTransport.onInitialConnect(() => {
-      changeState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES);
-      return resolve();
-    });
-  });
-
-  logger.info("-------------- Waiting for initial websocket connection");
   await dataTransport.connect();
-  await initialConnection;
+  changeState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES);
 });
 
 stateMachine.addHandlerForState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES, async ({changeState}) => {
@@ -179,8 +171,12 @@ stateMachine.runForever();
 
 
 function handleStateMachineError(err) {
-  if (err.message === "Websocket is disconnected") return;
-  logger.error(err);
+  const uninterestingErrorMessages = ["Bad token", "Websocket is disconnected"];
+
+  if (uninterestingErrorMessages.includes(err.message)) {
+    return logger.error(err.message);
+  }
+  return logger.error(err);
 }
 
 async function fetchCommands() {
