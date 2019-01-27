@@ -11,20 +11,21 @@ const sleep = require('./helpers/sleep');
 const TimeService = require('./services/TimeService');
 const CommandService = require('./services/CommandService');
 const HardwareIOService = require('./services/HardwareIOService');
+const {WebsocketClient} = require('websocket-transport');
 const StateMachine = require('./services/StateMachine');
 const stateMachine = new StateMachine({logger});
-const {NesWebsocketTransport} = require('websocket-transport');
+
 
 logger.setLevel(logLevels.info);
 
-const authToken = fs.readFileSync(path.join(__dirname, "..", "/auth_token.txt"));
+const authToken = fs.readFileSync(path.join(__dirname, "..", "/auth_token.txt")).toString().trim();
 const softwareVersion = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "/package.json")).toString()).version;
 const bootTime = new Date();
 const commitHash = childProcess.execSync('git rev-parse HEAD').toString().trim();
 
-const dataTransport = new NesWebsocketTransport({config, authToken, logger});
-
-dataTransport.onDisconnect(() => {
+const websocketService = new WebsocketClient({config, logger, host: config.API_HOST, port: config.API_PORT, useSsl: config.USE_SSL});
+websocketService.onDisconnect(() => {
+  stateMachine.changeState(constants.SYSTEM_STATE.INITIALIZING);
   nextCommandRefreshTimestamp = TimeService.getTime();
 });
 
@@ -81,7 +82,15 @@ function shouldSendOutletHistory() {
 }
 
 stateMachine.addHandlerForState(constants.SYSTEM_STATE.INITIALIZING, async ({changeState}) => {
-  await dataTransport.connect();
+  if (!websocketService.connected) {
+    return sleep(200);
+  }
+
+  changeState(constants.SYSTEM_STATE.AUTHENTICATING);
+});
+
+stateMachine.addHandlerForState(constants.SYSTEM_STATE.AUTHENTICATING, async ({changeState}) => {
+  await websocketService.authenticate(authToken);
   changeState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES);
 });
 
@@ -97,16 +106,12 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES, 
     })
   });
 
-  const {payload: {id}} = await dataTransport.request({
-    method: "POST",
-    path: "/controllers",
-    payload,
-  });
+  const {payload: {id}} = await websocketService.request({method: "POST", path: "/controllers", payload});
 
   logger.info(`Received id ${id}`);
   machineId = id;
 
-  await dataTransport.subscribe(`/controllers/${machineId}/status`, (update, flags) => {
+  websocketService.subscribe(constants.SERVER_EVENTS.SEND_STATUS, (data) => {
     logger.info("-------------- Sending status data");
     sendStatus();
   });
@@ -119,10 +124,7 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES, 
 });
 
 stateMachine.addHandlerForState(constants.SYSTEM_STATE.SIGNAL_DEVICE_BOOT, async ({changeState}) => {
-  await dataTransport.request({
-    method: "POST",
-    path: `/controllers/${machineId}/boot`,
-  });
+  await websocketService.request({method: "POST", path: `/controllers/${machineId}/boot`,});
 
   logger.info(`Signalled device boot`);
   didSignalBoot = true;
@@ -131,17 +133,15 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.SIGNAL_DEVICE_BOOT, async
 
 stateMachine.addHandlerForState(constants.SYSTEM_STATE.SYNCING_TIME, async ({changeState}) => {
   const start = new Date().getTime(),
-    {payload: {time}} = await dataTransport.request({
-      path: "/time"
-    }),
+    {payload: {time}} = await websocketService.request({path: "/time"}),
     end = new Date().getTime(),
     estimatedLatency = Math.trunc((start - end) / 2);
 
   TimeService.resetTime(time - estimatedLatency);
 
-  await dataTransport.subscribe(`/controllers/${machineId}/commands`, (update, flags) => {
+  websocketService.subscribe(constants.SERVER_EVENTS.NEW_COMMANDS, (data) => {
     logger.info("Received new commands from server");
-    processCommands(update);
+    processCommands(data);
   });
 
   changeState(constants.SYSTEM_STATE.STARTING_IO_TASK);
@@ -171,19 +171,17 @@ stateMachine.runForever();
 
 
 function handleStateMachineError(err) {
-  const uninterestingErrorMessages = ["Bad token", "Websocket is disconnected"];
-
-  if (uninterestingErrorMessages.includes(err.message)) {
-    return logger.error(err.message);
+  if (_.get(err, "payload.code") === WebsocketClient.constants.ERROR_CODES.AUTHENTICATE_FIRST) {
+    logger.error("Reauthentication needed");
+    stateMachine.changeState(constants.SYSTEM_STATE.AUTHENTICATING);
+  } else {
+    logger.error(err);
   }
-  return logger.error(err);
 }
 
 async function fetchCommands() {
   try {
-    const {payload} = await dataTransport.request({
-      path: `/controllers/${machineId}/commands`,
-    });
+    const {payload} = await websocketService.request({path: `/controllers/${machineId}/commands`,});
     logger.info("Fetched commands from server");
     processCommands(payload);
   } catch (err) {
@@ -195,10 +193,7 @@ async function fetchCommands() {
 
 async function heartbeat() {
   try {
-    await dataTransport.request({
-      path: `/controllers/${machineId}/heartbeat`,
-      method: "POST"
-    });
+    await websocketService.request({method: "POST", path: `/controllers/${machineId}/heartbeat`});
     logger.debug("Heartbeat");
     lastHearbeatTimestamp = TimeService.getTime();
   } catch (err) {
@@ -216,18 +211,18 @@ function reportOutletHistory() {
     return Promise.resolve();
   }
 
-  return dataTransport.request({
+  return websocketService.request({
     path: `/controllers/${machineId}/outlets/history`,
     method: "POST",
     payload: {history: outletHistory}
   }).then(() => {
-    logger.info(`Sent outlet history (${outletHistory.length} records)`);
+    logger.debug(`Sent outlet history (${outletHistory.length} records)`);
     HardwareIOService.clearSwitchingHistory(cutoffTimestamp);
     lastOutletHistoryReportTimestamp = TimeService.getTime();
   }).catch((err) => {
-    if (_.get(err, "data.statusCode") === 422) {
+    if (_.get(err, "payload.statusCode") === 422) {
       // Server already saw some of the history records that we sent.  This is OK.
-      logger.info(`Sent outlet history (${outletHistory.length} records)`);
+      logger.debug(`Sent outlet history (${outletHistory.length} records)`);
       logger.warn("Server indicated that some outlet history records were already seen");
       HardwareIOService.clearSwitchingHistory(cutoffTimestamp);
       lastOutletHistoryReportTimestamp = TimeService.getTime();
@@ -264,9 +259,9 @@ function sendStatus() {
     recentLogs: logger.getHistory()
   };
 
-  return dataTransport.request({
-      method: "POST",
+  return websocketService.request({
       path: `/controllers/${machineId}/status`,
+      method: "POST",
       payload,
     })
     .catch((err) => {

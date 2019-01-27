@@ -30,7 +30,7 @@
     "gulp-nodemon": "^2.2.1",
     "lodash": "4.17.4",
     "rpio": "^0.9.23",
-    "websocket-transport": "git+ssh://git@bitbucket.org/marcpeters/websocket-transport.git#v1.0.4"
+    "websocket-transport": "git+ssh://git@bitbucket.org/marcpeters/websocket-transport.git#v2.1.0"
   },
   "devDependencies": {
     "chai": "4.1.2",

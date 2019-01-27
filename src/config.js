@@ -9,7 +9,7 @@ function getConfig() {
       configuration = {
         API_HOST: "api.marcpeters.ca",
         API_PORT: 443,
-        USE_SECURE_WEBSOCKETS: true
+        USE_SSL: true
       };
       break;
 
@@ -17,7 +17,7 @@ function getConfig() {
       configuration = {
         API_HOST: "localhost",
         API_PORT: 8000,
-        USE_SECURE_WEBSOCKETS: false
+        USE_SSL: false
       };
       break;
 
