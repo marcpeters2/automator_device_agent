@@ -33,8 +33,8 @@ function getConfig() {
   configuration.OUTLETS = [
     {internalName: "A", type: constants.OUTLET_TYPE_ELECTRIC, pin: 29},
     {internalName: "B", type: constants.OUTLET_TYPE_ELECTRIC, pin: 31},
-    {internalName: "C", type: constants.OUTLET_TYPE_HYDRAULIC, pin: 33},
-    {internalName: "D", type: constants.OUTLET_TYPE_HYDRAULIC, pin: 35},
+    {internalName: "C", type: constants.OUTLET_TYPE_ELECTRIC, pin: 33},
+    {internalName: "D", type: constants.OUTLET_TYPE_ELECTRIC, pin: 35},
   ];
 
   configuration.HTTP_REQUEST_TIMEOUT_MS = 5000;
