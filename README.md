@@ -1,6 +1,6 @@
 # Device Agent
 
-A service which runs on a device and executes commands from the network.
+A service which runs on an IoT device designed to operate electrical outlets remotely.  Receives and executes commands from an API server via a persistent websocket connection.
 
 ## Developing
 - Install `npm` and `node v.8.9.x`
