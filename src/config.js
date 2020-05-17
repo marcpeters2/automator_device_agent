@@ -3,8 +3,9 @@ const constants = require('./constants');
 function getConfig() {
 
   let configuration;
+  const environment = (process.env.NODE_ENV || "local").toLowerCase();
 
-  switch((process.env.NODE_ENV || "").toLowerCase()) {
+  switch(environment) {
     case "production":
       configuration = {
         API_HOST: "api.marcpeters.ca",
