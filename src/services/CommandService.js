@@ -47,11 +47,16 @@ class CommandService {
     logger.debug(`at time ${millisNow}`);
 
     this._commands = _.mapValues(this._commands, (commandList) => {
-      return _.dropWhile(commandList, (command, index) => {
+      const commandsWithoutOldCommands = _.dropWhile(commandList, (command, index) => {
         return index + 1 < commandList.length &&
           new Date(command.time).getTime() < millisNow &&
           new Date(commandList[index + 1].time).getTime() < millisNow;
       });
+
+      // Remove the "isLast" flag on all commands except the last one
+      _.initial(commandsWithoutOldCommands).forEach(command => _.unset(command, "isLast"));
+
+      return commandsWithoutOldCommands;
     });
 
     logger.debug(`pruneCommands: Result is `);
