@@ -1,13 +1,10 @@
-const logger = require('./Logger');
+import {logger} from "./Logger"
 
 
 class TimeService {
+  private _millisOffset = 0;
 
-  constructor () {
-    this._millisOffset = 0;
-  }
-
-  resetTime(now) {
+  resetTime(now: number) {
     logger.debug(`Setting time to ${now}.  Current machine time is ${new Date().getTime()}.`);
     this._millisOffset = now - new Date().getTime();
     logger.debug(`New time offset is ${this._millisOffset}ms`);
@@ -20,4 +17,4 @@ class TimeService {
 
 const singleton = new TimeService();
 
-module.exports = singleton;
+export default singleton;

@@ -2,14 +2,32 @@ const msPerSecond = 1000,
   msPerMin = 60000,
   msPerDay = 86400000;
 
+export enum OutletType {
+  ELECTRIC = 'electric',
+  HYDRAULIC = 'hydraulic'
+}
+
+export enum SensorType {
+  WEIGHT = 'weight'
+}
+
+export enum OutletState {
+  OFF = 0,
+  ON = 1
+}
+
+export enum OutletStateString {
+  OFF = "off",
+  ON = "on",
+  UNKNOWN = "unknown"
+}
+
 const constants = {
-  OUTLET_TYPE_ELECTRIC: 'electric',
-  OUTLET_TYPE_HYDRAULIC: 'hydraulic',
-  OUTLET_STATE_ON: 1,
+  ALL_OUTLET_TYPES: [OutletType.ELECTRIC, OutletType.HYDRAULIC],
   OUTLET_STATE_ON_STRING: "on",
-  OUTLET_STATE_OFF: 0,
   OUTLET_STATE_OFF_STRING: "off",
   OUTLET_STATE_UNKNOWN_STRING: "unknown",
+  SENSOR_TYPE_WEIGHT: 'weight',
   SYSTEM_STATE: {
     INITIALIZING: "INITIALIZING",
     AUTHENTICATING: "AUTHENTICATING",
@@ -19,6 +37,18 @@ const constants = {
     PUBLISHING_CAPABILITIES: "PUBLISHING_CAPABILITIES",
     SIGNAL_DEVICE_BOOT: "SIGNAL_DEVICE_BOOT",
     OPERATING: "OPERATING",
+  },
+  COMMAND_REFRESHER_STATE: {
+    WAITING: "WAITING",
+    FETCHING_COMMANDS: "FETCHING_COMMANDS"
+  },
+  HEARTBEAT_STATE: {
+    WAITING: "WAITING",
+    SENDING_HEARTBEAT: "SENDING_HEARTBEAT"
+  },
+  STATE_CHANGE_PRIORITY: {
+    NORMAL: "NORMAL",
+    HIGHEST: "HIGHEST"
   },
   OUTLET_MIN_SWITCHING_INTERVAL_MS: 2000,
   COMMAND_REFRESH_LEAD_TIME_MS: msPerMin * 30,
@@ -39,7 +69,4 @@ const constants = {
   },
 };
 
-constants.ALL_OUTLET_TYPES = [constants.OUTLET_TYPE_ELECTRIC, constants.OUTLET_TYPE_HYDRAULIC];
-
-module.exports = constants;
-
+export default constants;

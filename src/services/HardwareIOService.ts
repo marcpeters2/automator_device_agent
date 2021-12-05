@@ -1,12 +1,35 @@
-const _ = require('lodash');
-const logger = require('./Logger');
-const TimeService = require('./TimeService');
-const constants = require('../constants');
-const { config } = require('../config');
-const rpio = require('rpio');
+import * as _ from "lodash";
+import {logger} from "./Logger";
+import TimeService from "./TimeService";
+import constants, {OutletState, OutletStateString} from "../constants";
+import {config} from "../config";
+// @ts-ignore
+import rpio from "rpio";
+
+type PinMetadata = {
+  // Object is keyed by pin number
+  [key: number]: {
+    lastSwitched: number,
+    state: OutletState
+  }
+};
+
+type SwitchingEvent = {
+  outletInternalId: number,
+  time: Date,
+  state: OutletStateString
+};
+
+type SwitchingHistoryOverflow = {
+  // Object is keyed by pin number (outlet internal id)
+  [key: number]: SwitchingEvent[]
+};
 
 
 class HardwareIOService {
+  private readonly _pinMeta: PinMetadata;
+  private _switchingHistory: SwitchingEvent[] = [];
+  private _switchingHistoryOverflow: SwitchingHistoryOverflow = {};
 
   constructor () {
     rpio.init({
@@ -18,12 +41,12 @@ class HardwareIOService {
       rpio.open(outlet.pin, rpio.OUTPUT, rpio.LOW);
     });
 
-    this._pinMeta = _.fromPairs(config.OUTLETS.map(outlet => [outlet.pin, {lastSwitched: 0, state: constants.OUTLET_STATE_OFF}]));
+    this._pinMeta = _.fromPairs(config.OUTLETS.map(outlet => [outlet.pin, {lastSwitched: 0, state: OutletState.OFF}]));
     this._initializeSwitchingHistory();
   }
 
 
-  setPinState(pinNum, state) {
+  setPinState(pinNum: number, state: OutletState) {
     const millisNow = new Date().getTime();
 
     if (this._pinMeta[pinNum].state === state) {
@@ -35,16 +58,16 @@ class HardwareIOService {
     }
 
     switch(state) {
-      case constants.OUTLET_STATE_ON:
-        this._pinMeta[pinNum].state = constants.OUTLET_STATE_ON;
+      case OutletState.ON:
+        this._pinMeta[pinNum].state = OutletState.ON;
         this._pinMeta[pinNum].lastSwitched = millisNow;
         logger.debug(`Pin ${pinNum} ON`);
         rpio.write(pinNum, rpio.HIGH);
         // process.stdout.write("\x1B[1;1H");
         // process.stdout.write(`Pin ${pinNum} ON`);
         break;
-      case constants.OUTLET_STATE_OFF:
-        this._pinMeta[pinNum].state = constants.OUTLET_STATE_OFF;
+      case OutletState.OFF:
+        this._pinMeta[pinNum].state = OutletState.OFF;
         this._pinMeta[pinNum].lastSwitched = millisNow;
         logger.debug(`Pin ${pinNum} OFF`);
         rpio.write(pinNum, rpio.LOW);
@@ -58,11 +81,11 @@ class HardwareIOService {
     this._recordSwitchingHistory(pinNum, state);
   }
 
-  _recordSwitchingHistory(pinNum, state) {
+  _recordSwitchingHistory(pinNum: number, state: OutletState) {
     this._switchingHistory.push({
       outletInternalId: pinNum,
       time: new Date(TimeService.getTime()),
-      state: String(state ? constants.OUTLET_STATE_ON_STRING : constants.OUTLET_STATE_OFF_STRING),
+      state: state ? OutletStateString.ON : OutletStateString.OFF
     });
 
     this._handleSwitchingHistoryOverflow();
@@ -89,7 +112,7 @@ class HardwareIOService {
       this._switchingHistoryOverflow[removedElement.outletInternalId].push({
         outletInternalId: removedElement.outletInternalId,
         time: outletHistoryUnknownFromDate,
-        state: constants.OUTLET_STATE_UNKNOWN_STRING
+        state: OutletStateString.UNKNOWN
       });
 
       logger.warn(`Outlet history discarded for pin ${removedElement.outletInternalId} from ${outletHistoryUnknownFromDate.toISOString()}`);
@@ -97,12 +120,12 @@ class HardwareIOService {
   }
 
 
-  _outletStateToString(state) {
+  _outletStateToString(state: OutletState) {
     switch(state) {
-      case constants.OUTLET_STATE_ON:
-        return constants.OUTLET_STATE_ON_STRING;
-      case constants.OUTLET_STATE_OFF:
-        return constants.OUTLET_STATE_OFF_STRING;
+      case OutletState.ON:
+        return OutletStateString.ON;
+      case OutletState.OFF:
+        return OutletStateString.OFF;
       default:
         throw new Error(`_pinStateToString: Unknown pin state: ${state}`);
     }
@@ -112,7 +135,7 @@ class HardwareIOService {
   getSwitchingHistory() {
     const now = TimeService.getTime(),
       currentPinStates = _.toPairs(this._pinMeta).map(([outletInternalId, pinMeta]) => ({
-        outletInternalId,
+        outletInternalId: Number(outletInternalId),
         time: new Date(now),
         state: this._outletStateToString(pinMeta.state)
       }));
@@ -141,7 +164,7 @@ class HardwareIOService {
   }
 
 
-  clearSwitchingHistory(onOrBeforeTimestamp) {
+  clearSwitchingHistory(onOrBeforeTimestamp: number) {
     const currentSwitchingHistory = this._getSwitchingHistoryExcludingOverflow();
     this._initializeSwitchingHistory();
 
@@ -160,4 +183,4 @@ class HardwareIOService {
 
 const singleton = new HardwareIOService();
 
-module.exports = singleton;
+export default singleton;

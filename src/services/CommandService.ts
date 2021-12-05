@@ -1,18 +1,30 @@
-const _ = require('lodash');
-const HardwareIOService = require('./HardwareIOService');
-const TimeService = require('./TimeService');
-const logger = require('./Logger');
-const { config } = require('../config');
-const constants = require('../constants');
+import * as _ from "lodash";
+import {setTimeout} from "timers";
+import {logger} from "./Logger";
+import {config} from "../config";
+import TimeService from "./TimeService";
+import HardwareIOService from "./HardwareIOService";
+import constants, {OutletState} from "../constants";
+import {HardwareCommands} from "../types/commands";
+
 
 class CommandService {
+  private _commands: HardwareCommands = {};
+  private _backgroundTaskRunning = false;
 
-  constructor () {
-    this._commands = {};
-    this._backgroundTaskRunning = false;
+  async fetchAndProcessCommands(machineId: number, websocketService: any) {
+    try {
+      const {payload} = await websocketService.request({path: `/controllers/${machineId}/commands`,});
+      logger.info("Fetched commands from server");
+      this.ingestCommands(payload);
+    } catch (err) {
+      logger.error("**** Error fetching commands");
+      throw err;
+    }
   }
 
-  ingestCommands(newCommands) {
+
+  ingestCommands(newCommands: HardwareCommands) {
     const millisNow = TimeService.getTime();
 
     logger.debug(`ingestCommands: Merging old commands`);
@@ -21,7 +33,7 @@ class CommandService {
     logger.debug(`${JSON.stringify(newCommands, null, 2)}`);
 
     //Merge new commands into existing commands
-    config.OUTLETS.map(_.property("pin"))
+    config.OUTLETS.map(outlet => outlet.pin)
       .forEach((pinNumber) => {
         if(!_.has(newCommands, pinNumber)) {
           //TODO: Should turn outlet off here?
@@ -63,6 +75,7 @@ class CommandService {
     logger.debug(JSON.stringify(this._commands, null, 2));
   }
 
+
   refreshCommandsHint() {
     let nextRecommendedRefreshTimestamp = Number.MAX_SAFE_INTEGER;
 
@@ -71,7 +84,18 @@ class CommandService {
         return;
       }
 
-      const recommendedRefreshTimeForOutlet = new Date(_.last(commandsForOutlet).time).getTime() - constants.COMMAND_REFRESH_LEAD_TIME_MS;
+      const lastCommand = _.last(commandsForOutlet);
+      let lastCommandTime;
+
+      if (!lastCommand) {
+        // If we don't have any commands for this outlet, consider the last command time to be now.
+        // This should force new commands to be fetched soon.
+        lastCommandTime = TimeService.getTime();
+      } else {
+        lastCommandTime = new Date(lastCommand.time).getTime();
+      }
+
+      const recommendedRefreshTimeForOutlet = lastCommandTime - constants.COMMAND_REFRESH_LEAD_TIME_MS;
       nextRecommendedRefreshTimestamp = Math.min(nextRecommendedRefreshTimestamp, recommendedRefreshTimeForOutlet);
     });
 
@@ -102,7 +126,7 @@ class CommandService {
         const commandsForOutlet = self._commands[outlet.pin];
 
         if(!commandsForOutlet) {
-          HardwareIOService.setPinState(outlet.pin, constants.OUTLET_STATE_OFF);
+          HardwareIOService.setPinState(outlet.pin, OutletState.OFF);
           return;
         }
 
@@ -121,8 +145,8 @@ class CommandService {
 
         if(activeCommand) {
           switch (activeCommand.state) {
-            case constants.OUTLET_STATE_OFF:
-            case constants.OUTLET_STATE_ON:
+            case OutletState.OFF:
+            case OutletState.ON:
               HardwareIOService.setPinState(outlet.pin, activeCommand.state);
               break;
             default:
@@ -131,7 +155,7 @@ class CommandService {
           }
         }
         else {
-          HardwareIOService.setPinState(outlet.pin, constants.OUTLET_STATE_OFF);
+          HardwareIOService.setPinState(outlet.pin, OutletState.OFF);
           return;
         }
       });
@@ -148,4 +172,4 @@ class CommandService {
 
 const singleton = new CommandService();
 
-module.exports = singleton;
+export default singleton;
