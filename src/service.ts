@@ -14,7 +14,7 @@ import {PostControllersPayload} from "./types/api";
 import {HardwareCommands} from "./types/commands";
 import TimeService from "./services/TimeService";
 import {HeartbeatStateMachineInterface} from "./state-machines/heartbeat";
-import {buildCommandRefresherStateMachine} from './state-machines/commandRefresher';
+import {buildCommandRefresherStateMachine, CommandRefresherStateMachineInterface} from './state-machines/commandRefresher';
 import {buildHeartbeatStateMachine} from './state-machines/heartbeat';
 // @ts-ignore
 import {WebsocketClient} from 'websocket-transport';
@@ -32,7 +32,7 @@ const bootTime = new Date();
 const commitHash = childProcess.execSync('git rev-parse HEAD').toString().trim();
 
 function abort() {
-  stateMachine.changeState(constants.SYSTEM_STATE.INITIALIZING, {priority: StateChangePriority.HIGHEST});
+  stateMachine.changeState(constants.SYSTEM_STATE.ERROR, {priority: StateChangePriority.HIGHEST});
 }
 
 const websocketService = new WebsocketClient({config, logger, host: config.API_HOST, port: config.API_PORT, useSsl: config.USE_SSL});
@@ -45,7 +45,7 @@ let lastOutletHistoryReportTimestamp = 0,
   lastHeartbeatTimestamp = 0,
   lastSensorReportTimestamp = 0,
   machineId: number | null = null,
-  commandRefresherStateMachine: StateMachine | null = null,
+  commandRefresherStateMachine: StateMachine<CommandRefresherStateMachineInterface> | null = null,
   heartbeatStateMachine: StateMachine<HeartbeatStateMachineInterface> | null,
   didSignalBoot = false;
 
@@ -62,7 +62,11 @@ function shouldSendOutletHistory() {
   return false;
 }
 
-stateMachine.addHandlerForState(constants.SYSTEM_STATE.INITIALIZING, async ({changeState}: StateHandlerArgs) => {
+stateMachine.addHandlerForState(constants.SYSTEM_STATE.ERROR, async ({changeState}) => {
+  return changeState(constants.SYSTEM_STATE.WAITING_FOR_WEBSOCKET_CONNECTION);
+});
+
+stateMachine.addHandlerForState(constants.SYSTEM_STATE.WAITING_FOR_WEBSOCKET_CONNECTION, async ({changeState}: StateHandlerArgs) => {
   if (!websocketService.connected) {
     return sleep(200);
   }
@@ -94,11 +98,6 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.PUBLISHING_CAPABILITIES, 
   logger.info(`Received id ${id}`);
   machineId = id;
 
-  websocketService.subscribe(constants.SERVER_EVENTS.SEND_STATUS, () => {
-    logger.info("-------------- Sending status data");
-    sendStatus();
-  });
-
   if (!didSignalBoot) {
     return changeState(constants.SYSTEM_STATE.SIGNAL_DEVICE_BOOT);
   } else {
@@ -117,30 +116,18 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.SIGNAL_DEVICE_BOOT, async
 
 
 stateMachine.addHandlerForState(constants.SYSTEM_STATE.SYNCING_TIME, async ({changeState}) => {
-  const start = new Date().getTime(),
-    {payload: {time}} = await websocketService.request({path: "/time"}),
-    end = new Date().getTime(),
-    estimatedLatency = Math.trunc((start - end) / 2);
+  const start = new Date().getTime();
+  const {payload: {time}} = await websocketService.request({path: "/time"});
+  const end = new Date().getTime();
+  const estimatedLatency = Math.trunc((start - end) / 2);
 
   TimeService.resetTime(time - estimatedLatency);
 
-  websocketService.subscribe(constants.SERVER_EVENTS.NEW_COMMANDS, (data: HardwareCommands) => {
-    logger.info("Received new commands from server");
-    CommandService.ingestCommands(data);
-  });
-
-  return changeState(constants.SYSTEM_STATE.STARTING_IO_TASK);
+  return changeState(constants.SYSTEM_STATE.STARTING_STATE_MACHINES);
 });
 
 
-stateMachine.addHandlerForState(constants.SYSTEM_STATE.STARTING_IO_TASK, async ({changeState}) => {
-  await CommandService.fetchAndProcessCommands(machineId!, websocketService);
-  CommandService.startBackgroundTask();
-  return changeState(constants.SYSTEM_STATE.OPERATING);
-});
-
-
-stateMachine.addHandlerForState(constants.SYSTEM_STATE.OPERATING, async () => {
+stateMachine.addHandlerForState(constants.SYSTEM_STATE.STARTING_STATE_MACHINES, async ({changeState}) => {
   assert(machineId !== null, "machineId has not been assigned")
 
   if (!commandRefresherStateMachine) {
@@ -156,6 +143,28 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.OPERATING, async () => {
     heartbeatStateMachine.run();
   }
 
+  return changeState(constants.SYSTEM_STATE.SUBSCRIBING_TO_EVENTS);
+});
+
+
+stateMachine.addHandlerForState(constants.SYSTEM_STATE.SUBSCRIBING_TO_EVENTS, async ({changeState}) => {
+  websocketService.subscribe(constants.SERVER_EVENTS.NEW_COMMANDS, (commands: HardwareCommands) => {
+    logger.info("Received new commands from server");
+    if (commandRefresherStateMachine) {
+      commandRefresherStateMachine.interface().ingestCommands(commands)
+    }
+  });
+
+  websocketService.subscribe(constants.SERVER_EVENTS.SEND_STATUS, () => {
+    logger.info("-------------- Sending status data");
+    sendStatus();
+  });
+
+  return changeState(constants.SYSTEM_STATE.OPERATING)
+});
+
+
+stateMachine.addHandlerForState(constants.SYSTEM_STATE.OPERATING, async () => {
   if (shouldSendOutletHistory()) {
     await reportOutletHistory();
   } else {
@@ -164,7 +173,7 @@ stateMachine.addHandlerForState(constants.SYSTEM_STATE.OPERATING, async () => {
 });
 
 
-stateMachine.addHandlerForStateTransition({from: constants.SYSTEM_STATE.OPERATING, to: StateMachine.ANY_STATE}, async () => {
+stateMachine.addHandlerForStateTransition({from: StateMachine.ANY_STATE, to: constants.SYSTEM_STATE.ERROR}, async () => {
   if (commandRefresherStateMachine) {
     await commandRefresherStateMachine.stop();
     commandRefresherStateMachine = null;
@@ -183,6 +192,7 @@ async function handleStateMachineError(err: any) {
     return stateMachine.changeState(constants.SYSTEM_STATE.AUTHENTICATING);
   } else {
     logger.error(err);
+    return abort();
   }
 }
 
@@ -248,7 +258,7 @@ async function sendStatus() {
 
 async function start() {
   stateMachine.onError(handleStateMachineError);
-  stateMachine.changeState(constants.SYSTEM_STATE.INITIALIZING);
+  stateMachine.changeState(constants.SYSTEM_STATE.WAITING_FOR_WEBSOCKET_CONNECTION);
   await stateMachine.run();
 }
 

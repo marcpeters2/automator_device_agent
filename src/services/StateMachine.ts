@@ -96,17 +96,24 @@ export class StateMachine<T = {}> {
     try {
       const someoneIsListeningForTransitionFromCurrentState =
         !!_.get(this._stateTransitionHandlers, [currentState, StateMachine.ANY_STATE]);
-      const someoneIsListeningForTransitionToNewState =
+      const someoneIsListeningForTransitionBetweenStates =
         !!_.get(this._stateTransitionHandlers, [currentState, desiredState.state]);
+      const someoneIsListeningForTransitionToState =
+          !!_.get(this._stateTransitionHandlers, [StateMachine.ANY_STATE, desiredState.state]);
 
-      if (someoneIsListeningForTransitionFromCurrentState || someoneIsListeningForTransitionToNewState) {
+      if (someoneIsListeningForTransitionFromCurrentState
+          || someoneIsListeningForTransitionBetweenStates
+          || someoneIsListeningForTransitionToState) {
         this._logger.info(`${this._logLinePrefix} Transitioning from state ${toString(currentState)} to state ${desiredState.state}`);
       }
       if (someoneIsListeningForTransitionFromCurrentState) {
         await this._stateTransitionHandlers[currentState][StateMachine.ANY_STATE]();
       }
-      if (someoneIsListeningForTransitionToNewState) {
+      if (someoneIsListeningForTransitionBetweenStates) {
         await this._stateTransitionHandlers[currentState][desiredState.state]();
+      }
+      if (someoneIsListeningForTransitionToState) {
+        await this._stateTransitionHandlers[StateMachine.ANY_STATE][desiredState.state]();
       }
 
       this._logger.info(`${this._logLinePrefix} State ${desiredState.state}`);

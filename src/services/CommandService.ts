@@ -14,7 +14,7 @@ class CommandService {
 
   async fetchAndProcessCommands(machineId: number, websocketService: any) {
     try {
-      const {payload} = await websocketService.request({path: `/controllers/${machineId}/commands`,});
+      const {payload} = await websocketService.request({path: `/controllers/${machineId}/commands`});
       logger.info("Fetched commands from server");
       this.ingestCommands(payload);
     } catch (err) {

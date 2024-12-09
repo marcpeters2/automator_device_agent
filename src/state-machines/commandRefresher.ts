@@ -4,10 +4,19 @@ import {logger} from "../services/Logger";
 import constants from "../constants";
 import timeService from "../services/TimeService";
 import commandService from "../services/CommandService";
+import CommandService from "../services/CommandService";
+import {HardwareCommands} from "../types/commands";
 
+export type CommandRefresherStateMachineInterface = {
+  ingestCommands: (commands: HardwareCommands) => void;
+}
 
 export function buildCommandRefresherStateMachine(machineId: number, websocketService: any) {
-  const stateMachine = new StateMachine({logger, name: "Commands"});
+  const externalInterface: CommandRefresherStateMachineInterface = {
+    ingestCommands
+  };
+
+  const stateMachine = new StateMachine({logger, name: "Commands", externalInterface});
 
   let lastCommandRefreshTimestamp = 0,
     nextCommandRefreshTimestamp = 0;
@@ -30,6 +39,21 @@ export function buildCommandRefresherStateMachine(machineId: number, websocketSe
     return false;
   }
 
+  function ingestCommands(commands: HardwareCommands) {
+    CommandService.ingestCommands(commands);
+
+    const now = timeService.getTime(),
+        commandRefreshTimeHint = commandService.refreshCommandsHint();
+    lastCommandRefreshTimestamp = now;
+    nextCommandRefreshTimestamp = Math.max(now + constants.COMMAND_REFRESH_MIN_INTERVAL_MS, commandRefreshTimeHint);
+
+    logger.info(`Next command retrieval: +${Math.trunc((nextCommandRefreshTimestamp - now)/1000)} seconds`);
+  }
+
+  stateMachine.addHandlerForState(constants.COMMAND_REFRESHER_STATE.INITIALIZING, async ({changeState}) => {
+    CommandService.startBackgroundTask();
+    return changeState(constants.COMMAND_REFRESHER_STATE.WAITING)
+  });
 
   stateMachine.addHandlerForState(constants.COMMAND_REFRESHER_STATE.WAITING, async ({changeState}) => {
     if (shouldRequestNewCommands()) {
@@ -40,19 +64,15 @@ export function buildCommandRefresherStateMachine(machineId: number, websocketSe
   });
 
   stateMachine.addHandlerForState(constants.COMMAND_REFRESHER_STATE.FETCHING_COMMANDS, async ({changeState}) => {
-    await commandService.fetchAndProcessCommands(machineId, websocketService);
+    const {payload} = await websocketService.request({path: `/controllers/${machineId}/commands`});
+    logger.info("Fetched commands from server");
 
-    const now = timeService.getTime(),
-      commandRefreshTimeHint = commandService.refreshCommandsHint();
-    lastCommandRefreshTimestamp = now;
-    nextCommandRefreshTimestamp = Math.max(now + constants.COMMAND_REFRESH_MIN_INTERVAL_MS, commandRefreshTimeHint);
-
-    logger.info(`Next command retrieval: +${Math.trunc((nextCommandRefreshTimestamp - now)/1000)} seconds`);
+    ingestCommands(payload);
 
     return changeState(constants.COMMAND_REFRESHER_STATE.WAITING);
   });
 
-  stateMachine.changeState(constants.COMMAND_REFRESHER_STATE.WAITING);
+  stateMachine.changeState(constants.COMMAND_REFRESHER_STATE.INITIALIZING);
 
   return stateMachine;
 }
